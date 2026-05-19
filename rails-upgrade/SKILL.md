@@ -17,7 +17,7 @@ description: Analyzes Rails applications and generates comprehensive upgrade rep
 
 ## Dependencies
 
-- **dual-boot skill** ([github.com/ombulabs/claude-code_dual-boot-skill](https://github.com/ombulabs/claude-code_dual-boot-skill)) — Sets up and manages dual-boot environments using the `next_rails` gem. Covers setup, `NextRails.next?` code patterns, CI configuration, and post-upgrade cleanup. Must be installed for Step 2 of the upgrade workflow.
+- **bootboot Bundler plugin** ([github.com/Shopify/bootboot](https://github.com/Shopify/bootboot)) — Provides the dual-boot mechanism this skill assumes. Bootboot keeps `Gemfile.lock` and `Gemfile_next.lock` in sync from a single `Gemfile` and lets the app boot with the alternate dependency set via `DEPENDENCIES_NEXT=1`. Step 2 of the workflow installs and configures it inline (no external skill required).
 - **rails-load-defaults skill** ([github.com/ombulabs/claude-code_rails-load-defaults-skill](https://github.com/ombulabs/claude-code_rails-load-defaults-skill)) — Handles incremental `load_defaults` updates with tiered risk assessment (Tier 1: low-risk, Tier 2: needs codebase grep, Tier 3: requires human review). Used as the final step after the Rails version upgrade is complete.
 
 ---
@@ -28,30 +28,82 @@ This skill follows the proven FastRuby.io upgrade methodology:
 
 1. **Incremental Upgrades** - Always upgrade one minor/major version at a time
 2. **Assessment First** - Understand scope before making changes
-3. **Dual-Boot Testing** - Test both versions during transition using `next_rails` gem
+3. **Dual-Boot Testing** - Test both versions during transition using the `bootboot` Bundler plugin (one `Gemfile`, `Gemfile.lock` + `Gemfile_next.lock`, `DEPENDENCIES_NEXT=1` to boot the alternate set)
 4. **Test Coverage** - Ensure adequate test coverage before upgrading (aim for 80%+)
 5. **Gem Compatibility** - Check gem compatibility at each step using RailsBump
 6. **Deprecation Warnings** - Address deprecations before upgrading
 7. **Backwards Compatible Changes** - Deploy small changes to production before version bump
 
 **Key Resources:**
-- **DELEGATE** to the `dual-boot` skill for dual-boot setup with `next_rails` (see Dependencies)
+- Step 2 installs and configures `bootboot` inline — see "CRITICAL: Dual-Boot Setup with bootboot" below
 - See `references/deprecation-warnings.md` for managing deprecations
 - See `references/staying-current.md` for maintaining upgrades over time
 
 ---
 
-## CRITICAL: Dual-Boot Code Pattern with `NextRails.next?`
+## CRITICAL: Dual-Boot Setup with bootboot
 
-When proposing code fixes that must work with both the current and target Rails versions (dual-boot), **always use `NextRails.next?` from the `next_rails` gem** — never use `respond_to?` or other feature-detection patterns.
+This skill assumes [bootboot](https://github.com/Shopify/bootboot), a Bundler plugin, as the dual-boot mechanism. Bootboot keeps a single `Gemfile` whose conditional blocks resolve to different versions depending on an environment variable, and maintains both `Gemfile.lock` and `Gemfile_next.lock` in lockstep on every `bundle install`.
 
-**DELEGATE** to the `dual-boot` skill for:
-- Setup and initialization (`next_rails --init`, `Gemfile.next`)
-- `NextRails.next?` code patterns and examples
-- CI configuration for dual-boot testing
-- Post-upgrade cleanup (removing dual-boot branches)
+### Install (one time, run inside the Rails app)
 
-**DEPENDENCY:** Requires the [dual-boot skill](https://github.com/ombulabs/claude-code_dual-boot-skill)
+1. Add the plugin loader to the top of `Gemfile`:
+
+   ```ruby
+   # Only enable bootboot in dev / test (it does not play well with some deploy
+   # platforms — e.g. Heroku). Set ENABLE_BOOTBOOT=1 to opt in elsewhere.
+   plugin "bootboot", "~> 0.2.2" if !ENV["RAILS_ENV"] || ENV["RAILS_ENV"] == "test" || ENV["ENABLE_BOOTBOOT"]
+   Plugin.send(:load_plugin, "bootboot") if Plugin.installed?("bootboot")
+
+   if ENV["DEPENDENCIES_NEXT"] == "1"
+     enable_dual_booting if Plugin.installed?("bootboot")
+   end
+   ```
+
+2. Express the upgrade in a conditional block lower in the `Gemfile`:
+
+   ```ruby
+   if ENV["DEPENDENCIES_NEXT"] == "1"
+     gem "rails", "~> 7.2.0"
+     # Any gems that must move forward together with Rails
+   else
+     gem "rails", "~> 7.1.0"
+     # Current-version pins (often the same gem at an older line)
+   end
+   ```
+
+3. Run `bundle install && bundle bootboot` once. After that, every plain `bundle install` updates both lockfiles. Commit `Gemfile`, `Gemfile.lock`, and `Gemfile_next.lock`.
+
+### Run the app on either side
+
+```sh
+# Current Rails (Gemfile.lock)
+bundle exec rspec
+bin/rails server
+
+# Next Rails (Gemfile_next.lock)
+DEPENDENCIES_NEXT=1 bundle exec rspec
+DEPENDENCIES_NEXT=1 bin/rails server
+```
+
+### Code-level dual-boot guard
+
+When a fix has to live on both sides, gate it on the same env var Bundler uses. **Do not** use `respond_to?` or other feature detection — `ENV["DEPENDENCIES_NEXT"]` matches what bootboot itself reads, so the boot-time gate and the code-time gate stay aligned.
+
+```ruby
+if ENV["DEPENDENCIES_NEXT"]
+  # Code that requires the next Rails version
+else
+  # Code that runs against the current Rails version
+end
+```
+
+If the project wraps the check in a helper (e.g. `AppConfig.dependencies_next?`), use that helper instead of inlining the env-var read. The cleanup workflow knows how to collapse both shapes.
+
+### Caveats
+
+- `bootboot` resolves and locks dependencies for both sets, but it does not switch your local Ruby. If the next set bumps Ruby, install the new Ruby separately (via `asdf` / `rbenv`) and switch before running `DEPENDENCIES_NEXT=1` commands.
+- `bootboot` does **not** ship a `bundle_report compatibility` equivalent. Step 4.5 (Gem Compatibility) uses railsbump.org as the primary check. `bundle_report compatibility` from `next_rails` is available as an offline alternative if the user already has it installed as a CLI; see `workflows/gem-compatibility-workflow.md`.
 
 ---
 
@@ -79,7 +131,7 @@ Claude should activate this skill when user says:
 - "Finish the upgrade"
 - "Clean up after my Rails upgrade"
 - "Remove the dual-boot setup"
-- "Drop the NextRails branches"
+- "Drop the DEPENDENCIES_NEXT branches"
 - "We're done upgrading to Rails [version]"
 
 ---
@@ -169,18 +221,18 @@ If user requests a multi-hop upgrade (e.g., 5.2 → 8.1):
 - `workflows/test-suite-verification-workflow.md` - **MANDATORY FIRST STEP** - How to run and verify test suite
 - `workflows/direct-detection-workflow.md` - How to run breaking change detection directly
 - `workflows/upgrade-report-workflow.md` - How to generate upgrade reports
-- `workflows/gem-compatibility-workflow.md` - **Load in Step 4.5** - Per-lockfile gem compatibility check against the target Rails version. Documents both the primary (`next_rails` `bundle_report compatibility`) and the secondary (railsbump.org API) and the rules for when to escalate.
-- `workflows/boot-smoke-test-workflow.md` - **Load in Step 4.6** - Run a Rails-loading command against `Gemfile.next` to catch gem-level runtime incompat that the resolver can't see (gems calling removed Rails internals or `require`-ing removed files).
+- `workflows/gem-compatibility-workflow.md` - **Load in Step 4.5** - Per-lockfile gem compatibility check against the target Rails version. Documents the primary (railsbump.org API), the optional offline alternative (`bundle_report compatibility` from `next_rails`, available when the user has the CLI installed separately), and how to reconcile their output.
+- `workflows/boot-smoke-test-workflow.md` - **Load in Step 4.6** - Boot Rails under the next dependency set (`DEPENDENCIES_NEXT=1`) to catch gem-level runtime incompat that the resolver can't see (gems calling removed Rails internals or `require`-ing removed files).
 - `workflows/ci-sync-workflow.md` - **MANDATORY before opening the upgrade PR** - How to verify CI config matches the upgraded Gemfile
 - `workflows/app-update-preview-workflow.md` - How to generate app:update previews
-- **`upgrade-cleanup` companion plugin** - User-triggered. Removes dual-boot scaffolding and drops `NextRails.next?` / `NextRails.current?` branches. Deprecation triage stays with this skill for the next hop.
+- **`upgrade-cleanup` companion plugin** - User-triggered. Removes dual-boot scaffolding and drops `if ENV["DEPENDENCIES_NEXT"]` branches. Deprecation triage stays with this skill for the next hop.
 
 ### Examples (Load when user needs clarification)
 - `examples/simple-upgrade.md` - Single-hop upgrade example
 - `examples/multi-hop-upgrade.md` - Multi-hop upgrade example
 
 ### External Dependencies
-- **dual-boot skill** - Dual-boot setup and management with next_rails (Step 2) (https://github.com/ombulabs/claude-code_dual-boot-skill)
+- **bootboot Bundler plugin** - Dual-boot mechanism, installed and configured inline in Step 2 (https://github.com/Shopify/bootboot)
 - **rails-load-defaults skill** - Incremental load_defaults alignment (Step 7, final step) (https://github.com/ombulabs/claude-code_rails-load-defaults-skill)
 
 ### Reference Materials
@@ -242,14 +294,30 @@ When user requests an upgrade, follow this workflow:
    - Proceed to Step 2
 ```
 
-### Step 2: Set Up Dual-Boot with next_rails (EARLY SETUP)
+### Step 2: Set Up Dual-Boot with bootboot (EARLY SETUP)
 ```
-DELEGATE to the dual-boot skill for setup and initialization.
-That skill handles:
-- Checking if Gemfile.next already exists (to avoid duplicate `next?` method)
-- Adding next_rails gem and running next_rails --init
-- Installing dependencies for both Rails versions
-- Configuring the Gemfile with `if next?` conditionals
+Follow the "CRITICAL: Dual-Boot Setup with bootboot" section above.
+The setup is short enough to do inline — no external skill required.
+
+Before editing the Gemfile:
+- Check whether bootboot is already wired up (grep for `plugin "bootboot"`
+  in Gemfile and the presence of Gemfile_next.lock). If both are present,
+  skip the install steps and reuse the existing scaffolding.
+- Check whether next_rails was previously used (presence of Gemfile.next /
+  Gemfile.next.lock, a local `next?` method in the Gemfile, or
+  NextRails.next? references). If yes, ask the user whether to migrate
+  from next_rails to bootboot or leave the existing setup. Do not
+  silently delete the existing dual-boot scaffolding.
+
+Then:
+- Add the bootboot plugin loader and the `enable_dual_booting` block
+  to Gemfile (snippet in the section above).
+- Express the upgrade as an `if ENV["DEPENDENCIES_NEXT"] == "1"` block
+  pinning the target Rails version.
+- Run `bundle install && bundle bootboot` once.
+- Confirm both Gemfile.lock and Gemfile_next.lock now exist and pin the
+  expected Rails versions.
+- Smoke-check the next side with `DEPENDENCIES_NEXT=1 bin/rails runner "puts Rails.version"`.
 ```
 
 ### Step 3: Validate Upgrade Path
@@ -278,9 +346,10 @@ Claude runs detection directly using tools - NO script generation needed
 Determines which gems must be bumped before the Rails version change can resolve.
 
 1. Read: workflows/gem-compatibility-workflow.md and follow it. The
-   workflow documents the primary check (next_rails bundle_report),
-   the conditions for escalating to the secondary (railsbump API),
-   and the bucket mapping for both.
+   workflow documents the primary check (railsbump.org API), the
+   optional offline alternative (next_rails bundle_report, available
+   when the CLI is installed separately), and the bucket mapping for
+   both.
 2. Pass the resulting three buckets — required bumps, blockers,
    already compatible — into Step 5's report so the gem-update
    section reflects real per-lockfile data.
@@ -289,14 +358,14 @@ Determines which gems must be bumped before the Rails version change can resolve
    otherwise.
 ```
 
-### Step 4.6: Boot Smoke Test on Gemfile.next
+### Step 4.6: Boot Smoke Test on the Next Dependency Set
 ```
 Catches the gem-internal incompatibilities that Step 4 (codebase grep) and
 Step 4.5 (resolver-level compat check) cannot see.
 
 A gem can declare loose Rails constraints — no upper bound on activerecord /
-activesupport — and `bundle_report compatibility` plus `bundle install` will
-both call it "compatible." But at runtime, the gem may:
+activesupport — and both railsbump and `bundle install` will call it
+"compatible." But at runtime, the gem may:
 
   - call a Rails internal that was removed at the target version
     (e.g. database_cleaner-active_record 2.1.x calling
@@ -310,11 +379,12 @@ the report is written, lets them land in fix-before-bump where they belong
 instead of mid-implementation.
 
 1. Read: workflows/boot-smoke-test-workflow.md
-2. Run a Rails-loading command against Gemfile.next:
-     BUNDLE_GEMFILE=Gemfile.next bundle exec rspec --dry-run
-   (or `bin/rails runner "puts Rails.version"`, or `bundle exec rspec` if
-   the suite is fast enough — anything that triggers
-   `Bundler.require(*Rails.groups)` and the framework boot.)
+2. Run a Rails-loading command under the next dependency set:
+     DEPENDENCIES_NEXT=1 bundle exec rspec --dry-run
+   (or `DEPENDENCIES_NEXT=1 bin/rails runner "puts Rails.version"`, or
+   `DEPENDENCIES_NEXT=1 bundle exec rspec` if the suite is fast enough —
+   anything that triggers `Bundler.require(*Rails.groups)` and the
+   framework boot under Gemfile_next.lock.)
 3. If boot fails, capture the LoadError / NoMethodError trace, identify
    the offending gem (grep the bundle paths for the missing constant or
    file), check rubygems for a newer version with target-Rails compat,
@@ -342,9 +412,9 @@ instead of mid-implementation.
 ```
 1. Present Comprehensive Upgrade Report first
 2. Present app:update Preview Report second
-3. Apply fix-before-bump changes (`kind: breaking` and `kind: deprecation`). Most fixes are direct rewrites — the new API typically works on both sides of the dual-boot pair (e.g., `update_attributes` → `update`). Use `NextRails.next?` only when the fix requires target-version-only APIs that don't exist in the current Rails
-4. Update Gemfile to target Rails version
-5. Run test suite against both versions
+3. Apply fix-before-bump changes (`kind: breaking` and `kind: deprecation`). Most fixes are direct rewrites — the new API typically works on both sides of the dual-boot pair (e.g., `update_attributes` → `update`). Use an `if ENV["DEPENDENCIES_NEXT"]` guard only when the fix requires target-version-only APIs that don't exist in the current Rails
+4. Update the Gemfile's next-side conditional to the target Rails version (and any required gem bumps), then run `bundle install` so both Gemfile.lock and Gemfile_next.lock update
+5. Run test suite against both versions (`bundle exec rspec` and `DEPENDENCIES_NEXT=1 bundle exec rspec`)
 6. **Check CI config matches the upgraded Gemfile** — load `workflows/ci-sync-workflow.md`, fix any mismatches before proceeding
 7. Deploy and verify
 ```
@@ -371,15 +441,16 @@ Triaging tomorrow's deprecation warnings now expands the scope of the current ho
 
 1. Tell the user the cleanup option exists
 2. Delegate to the upgrade-cleanup plugin only when the user explicitly asks
-   ("finish the upgrade", "clean up dual-boot", "drop the NextRails branches")
-3. The cleanup plugin removes NextRails.next? / NextRails.current? branches
-   and retires dual-boot scaffolding. Deprecation triage stays with this
-   skill for the next hop, not with cleanup.
+   ("finish the upgrade", "clean up dual-boot", "drop the DEPENDENCIES_NEXT branches")
+3. The cleanup plugin removes `if ENV["DEPENDENCIES_NEXT"]` branches and
+   retires the bootboot scaffolding (plugin line, `enable_dual_booting`
+   block, Gemfile_next.lock, conditional gem groups). Deprecation triage
+   stays with this skill for the next hop, not with cleanup.
 ```
 
 **Sample wording the agent can crib from when prompting the user:**
 
-> Rails X.Y is in. When you're ready to remove dual-boot scaffolding (drop `NextRails.next?` / `NextRails.current?` branches, retire `Gemfile.next`), ask me to clean up. If you're heading straight to the next hop, keeping dual-boot in place is also fine.
+> Rails X.Y is in. When you're ready to remove dual-boot scaffolding (drop `if ENV["DEPENDENCIES_NEXT"]` branches, retire the bootboot plugin and `Gemfile_next.lock`), ask me to clean up. If you're heading straight to the next hop, keeping dual-boot in place is also fine.
 
 ---
 
@@ -435,8 +506,8 @@ Before starting ANY upgrade:
 5. If tests PASS → Record baseline and proceed
 
 **Action - Step 2 (Set Up Dual-Boot):**
-1. DELEGATE to the `dual-boot` skill for setup
-2. Set up next_rails, Gemfile.next, and dual-boot CI
+1. Follow the "CRITICAL: Dual-Boot Setup with bootboot" section above for inline setup
+2. Wire bootboot into the Gemfile, run `bundle install && bundle bootboot`, and extend CI to run the next-dependency-set side (`DEPENDENCIES_NEXT=1`)
 
 **Action - Step 3 (Validate Upgrade Path):**
 1. Validate upgrade path (single-hop vs multi-hop)
@@ -449,7 +520,7 @@ Before starting ANY upgrade:
 
 **Action - Step 4.5 (Check Gem Compatibility):**
 1. Load: `workflows/gem-compatibility-workflow.md` and follow it
-2. Run primary check (`bundle_report compatibility`); escalate to railsbump only when the workflow's conditions trigger
+2. Run primary check (railsbump API); fall back to `bundle_report compatibility` only if the user has `next_rails` installed as a standalone CLI and the workflow's conditions trigger
 3. Pass the resulting buckets (required bumps, blockers, already compatible) into Step 5's report
 4. If blockers exist, load `references/gem-compatibility.md` for the fork/replace/vendor playbook
 
@@ -461,9 +532,9 @@ Before starting ANY upgrade:
 5. Present both reports to user
 
 **Action - Step 6 (Implement & Upgrade):**
-1. Apply fix-before-bump changes (`kind: breaking` and `kind: deprecation`). Most fixes are direct rewrites — the new API typically works on both sides of the dual-boot pair (e.g., `update_attributes` → `update`). Use `NextRails.next?` only when the fix requires target-version-only APIs that don't exist in the current Rails
-2. Update Gemfile to target Rails version
-3. Run tests against both versions
+1. Apply fix-before-bump changes (`kind: breaking` and `kind: deprecation`). Most fixes are direct rewrites — the new API typically works on both sides of the dual-boot pair (e.g., `update_attributes` → `update`). Use an `if ENV["DEPENDENCIES_NEXT"]` guard only when the fix requires target-version-only APIs that don't exist in the current Rails
+2. Update the Gemfile's next-side conditional to the target Rails version and run `bundle install` so both Gemfile.lock and Gemfile_next.lock update
+3. Run tests against both versions (`bundle exec rspec` and `DEPENDENCIES_NEXT=1 bundle exec rspec`)
 4. **Check CI config matches the upgraded Gemfile** (`workflows/ci-sync-workflow.md`) — fix any mismatches before declaring Step 6 complete
 5. Deploy and verify
 
@@ -485,8 +556,8 @@ Before starting ANY upgrade:
 3. If tests pass → Proceed with planning
 
 **Action - Step 2 (Set Up Dual-Boot):**
-1. DELEGATE to the `dual-boot` skill for setup (if not already set up)
-2. Dual-boot stays active throughout the multi-hop process
+1. Follow the inline bootboot setup (see "CRITICAL: Dual-Boot Setup with bootboot") if not already set up
+2. Dual-boot stays active throughout the multi-hop process — between hops, update the next-side conditional in the Gemfile to the new target and run `bundle install` again
 
 **Action - Step 3 (Plan & Execute):**
 1. Explain sequential requirement
@@ -563,10 +634,10 @@ Before delivering, verify:
 10. **Load Workflows as Needed** (don't hold everything in memory)
 11. **Sequential Process is Critical** (patch check → tests → dual-boot → validate path → detection → reports → implement → load_defaults)
 12. **Follow FastRuby.io Methodology** (incremental upgrades, assessment first)
-13. **Always Use `NextRails.next?` for Dual-Boot Code** (NEVER use `respond_to?` for version branching. DELEGATE to the `dual-boot` skill for patterns and setup.)
+13. **Always Use `ENV["DEPENDENCIES_NEXT"]` for Dual-Boot Code** (NEVER use `respond_to?` for version branching. Bootboot reads the same env var to pick a lockfile, so the boot-time gate and the code-time gate stay aligned. See "CRITICAL: Dual-Boot Setup with bootboot" for patterns.)
 14. **Check CI Config Before Opening the PR** (run `workflows/ci-sync-workflow.md` to make sure every CI file matches the upgraded Gemfile — stale CI is the most common cause of red builds on upgrade PRs)
 15. **Align load_defaults After the Version Bump** (load_defaults update happens AFTER the Rails version upgrade is complete)
-16. **Mention, Don't Auto-Run, Cleanup** (after the upgrade ships, mention the `upgrade-cleanup` plugin. Delegate to it only when the user explicitly asks: "finish the upgrade", "clean up dual-boot", "drop the NextRails branches". Cleanup removes `NextRails.next?` / `NextRails.current?` branches and retires dual-boot scaffolding. Deprecation triage stays with this skill for the next hop.)
+16. **Mention, Don't Auto-Run, Cleanup** (after the upgrade ships, mention the `upgrade-cleanup` plugin. Delegate to it only when the user explicitly asks: "finish the upgrade", "clean up dual-boot", "drop the DEPENDENCIES_NEXT branches". Cleanup removes `if ENV["DEPENDENCIES_NEXT"]` branches and retires bootboot scaffolding. Deprecation triage stays with this skill for the next hop.)
 
 ---
 

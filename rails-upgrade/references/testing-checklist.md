@@ -261,8 +261,8 @@ Rollback immediately if:
 ## Test Environment Setup
 
 ```bash
-# Run tests with Rails next version
-BUNDLE_GEMFILE=Gemfile.next bundle exec rspec
+# Run tests with the next dependency set (bootboot)
+DEPENDENCIES_NEXT=1 bundle exec rspec
 
 # Run with verbose deprecation warnings
 RUBYOPT="-W:deprecated" bundle exec rspec

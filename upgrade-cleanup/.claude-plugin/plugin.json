@@ -1,7 +1,7 @@
 {
   "name": "upgrade-cleanup",
   "version": "0.1.0",
-  "description": "Clean up after a Rails upgrade. Drops NextRails.next? / NextRails.current? branches and retires dual-boot scaffolding (Gemfile.next, conditional Gemfile groups, dual-boot CI job).",
+  "description": "Clean up after a Rails upgrade. Drops `if ENV[\"DEPENDENCIES_NEXT\"]` branches and retires bootboot dual-boot scaffolding (Gemfile_next.lock, the bootboot plugin loader, conditional Gemfile gem blocks, dual-boot CI job).",
   "skills": "./upgrade-cleanup/",
   "author": {
     "name": "OmbuLabs",
@@ -14,7 +14,7 @@
     "rails",
     "upgrade",
     "cleanup",
-    "next_rails",
+    "bootboot",
     "dual-boot",
     "fastruby"
   ]

@@ -26,7 +26,7 @@ We've encountered (and solved) edge cases that don't appear in any documentation
 
 ### Installation
 
-This skill depends on two companion skills: [rails-load-defaults](https://github.com/ombulabs/claude-code_rails-load-defaults-skill) and [dual-boot](https://github.com/ombulabs/claude-code_dual-boot-skill). A fourth sibling plugin, `upgrade-cleanup`, lives in this repo and runs the post-upgrade scaffolding teardown. The marketplace install handles all four.
+This skill has one companion skill, [rails-load-defaults](https://github.com/ombulabs/claude-code_rails-load-defaults-skill), and one sibling plugin in this repo, `upgrade-cleanup`, that runs the post-upgrade scaffolding teardown. Dual-boot is handled inline using the [bootboot](https://github.com/Shopify/bootboot) Bundler plugin — no separate skill required.
 
 **From inside the Claude Code CLI prompt (recommended):**
 
@@ -34,7 +34,6 @@ This skill depends on two companion skills: [rails-load-defaults](https://github
 /plugin marketplace add ombulabs/claude-skills
 /plugin install rails-upgrade@ombulabs-ai
 /plugin install rails-load-defaults@ombulabs-ai
-/plugin install dual-boot@ombulabs-ai
 /plugin install upgrade-cleanup@ombulabs-ai
 ```
 
@@ -44,7 +43,6 @@ This skill depends on two companion skills: [rails-load-defaults](https://github
 claude plugin marketplace add https://github.com/ombulabs/claude-skills.git
 claude plugin install rails-upgrade@ombulabs-ai
 claude plugin install rails-load-defaults@ombulabs-ai
-claude plugin install dual-boot@ombulabs-ai
 claude plugin install upgrade-cleanup@ombulabs-ai
 ```
 
@@ -61,11 +59,9 @@ cp -r claude-code_rails-upgrade-skill/upgrade-cleanup ~/.claude/skills/
 # 3. rails-load-defaults (dependency)
 git clone https://github.com/ombulabs/claude-code_rails-load-defaults-skill.git
 cp -r claude-code_rails-load-defaults-skill/rails-load-defaults ~/.claude/skills/
-
-# 4. dual-boot (dependency)
-git clone https://github.com/ombulabs/claude-code_dual-boot-skill.git
-cp -r claude-code_dual-boot-skill/dual-boot ~/.claude/skills/
 ```
+
+The `bootboot` Bundler plugin gets installed inside your Rails app during Step 2 of the upgrade workflow (`plugin "bootboot"` in the `Gemfile`, then `bundle install && bundle bootboot`). It is not a Claude Code skill and does not need to be installed at the `~/.claude` level.
 
 ### Basic Usage
 
@@ -87,7 +83,7 @@ In Claude Code, navigate to your Rails application directory and use natural lan
 | Command | Description |
 |---------|-------------|
 | `/rails-upgrade` | Start the upgrade assistant |
-| "Finish the upgrade" / "Clean up dual-boot" / "Abandon this upgrade" | Trigger the `upgrade-cleanup` plugin. Asks whether to keep the next or current version, then drops `NextRails.next?` / `NextRails.current?` branches and retires dual-boot scaffolding. |
+| "Finish the upgrade" / "Clean up dual-boot" / "Abandon this upgrade" | Trigger the `upgrade-cleanup` plugin. Asks whether to keep the next or current version, then drops `if ENV["DEPENDENCIES_NEXT"]` branches and retires bootboot scaffolding. |
 | "Upgrade to Rails X.Y" | Generate reports from detection results |
 | "Show app:update changes" | Preview configuration file changes |
 | "Plan upgrade from X to Y" | Get multi-hop upgrade strategy |
@@ -98,9 +94,9 @@ This skill implements the **FastRuby.io upgrade methodology**, which includes:
 
 ### Dual-Boot Strategy
 
-Run your application with two versions of Rails simultaneously using the [`next_rails`](https://github.com/fastruby/next_rails) gem. This allows you to test both versions during the transition and deploy backwards-compatible changes before the version bump.
+Run your application with two versions of Rails simultaneously using the [`bootboot`](https://github.com/Shopify/bootboot) Bundler plugin. Bootboot keeps a single `Gemfile` with conditional blocks plus two lockfiles (`Gemfile.lock` and `Gemfile_next.lock`) and lets the app boot under either set by prefixing commands with `DEPENDENCIES_NEXT=1`. This lets you test both versions during the transition and deploy backwards-compatible changes before the version bump.
 
-See the [dual-boot skill](https://github.com/ombulabs/claude-code_dual-boot-skill) for setup, code patterns, and CI configuration.
+Step 2 of the upgrade workflow wires bootboot into the Gemfile inline (see `rails-upgrade/SKILL.md` → "CRITICAL: Dual-Boot Setup with bootboot" for the snippet). Application code that has to branch on the active dependency set uses `if ENV["DEPENDENCIES_NEXT"]` — the same env var bootboot reads, so the boot-time gate and the code-time gate stay aligned.
 
 ### Post-Upgrade Cleanup
 
@@ -109,8 +105,8 @@ Once a hop is finished (or abandoned), the `upgrade-cleanup` sibling plugin tear
 Activate it with phrases like "finish the upgrade", "clean up dual-boot", or "abandon this upgrade". The workflow:
 
 1. **Phase 0 - Pre-flight.** Detects Docker vs local, smoke-checks `bundle` / `bin/rails runner` on both sides, and asks whether to keep the **next** version (finishing) or the **current** version (abandoning / pausing the hop).
-2. **Phase 1 - Dual-boot removal.** Drops `NextRails.next?` / `NextRails.current?` branches, strips the `next?` Gemfile method and conditional groups, sweeps for `deprecation_tracker` residue *before* removing `next_rails` (the gem ships `DeprecationTracker`; leftover `require`s break test boot), swaps lockfiles, and updates CI to drop the dual-boot job.
-3. **Phase 2 - Old-version code retirement.** Monkey-patches, stale gem pins, `docker-compose.yml` / `compose.yaml` sister services (`web-next`, `worker-next` with `BUNDLE_GEMFILE: Gemfile.next`), and doc drift (`README`, `bin/setup`, `.tool-versions`, `Dockerfile`).
+2. **Phase 1 - Dual-boot removal.** Drops `if ENV["DEPENDENCIES_NEXT"]` branches (and any project-specific wrapper helpers), removes the bootboot plugin loader and `enable_dual_booting` activation from the `Gemfile`, swaps lockfiles, and updates CI to drop the dual-boot job. If the project previously ran on `next_rails`, the workflow notes how to sweep its residue (`Gemfile.next*`, `NextRails.next?`, `deprecation_tracker`) in the same pass.
+3. **Phase 2 - Old-version code retirement.** Monkey-patches, stale gem pins, `docker-compose.yml` / `compose.yaml` sister services (`web-next`, `worker-next` that set `DEPENDENCIES_NEXT=1`), and doc drift (`README`, `bin/setup`, `.tool-versions`, `Dockerfile`).
 4. **Phase 3 - Housekeeping.** CI matrix entry, `Dockerfile` / `.ruby-version` / `.tool-versions` alignment for Ruby bumps.
 5. **Phase 4 - Final verification.** Local or CI, with explicit fallback to CI when the local environment can't run tests.
 6. **Phase 5 - Commit and PR.** Suggested commit messages, single-purpose PR.

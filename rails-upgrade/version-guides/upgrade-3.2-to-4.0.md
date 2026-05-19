@@ -104,7 +104,7 @@ require 'strong_parameters' # in engine.rb or controller
 
 If you need dual-boot compatibility during the transition:
 ```ruby
-require 'strong_parameters' unless NextRails.next?
+require 'strong_parameters' unless ENV["DEPENDENCIES_NEXT"]
 ```
 
 ---
