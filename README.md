@@ -174,18 +174,6 @@ We welcome contributions! Here's how you can help:
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
 
-## Sponsors
+## Attribution
 
-This project is sponsored by:
-
-### [OmbuLabs.ai](https://ombulabs.ai) | Custom AI Solutions
-
-We build custom AI solutions that integrate with your existing workflows. From Claude Code skills to full AI agent systems.
-
-### [FastRuby.io](https://fastruby.io) | Ruby Maintenance, Done Right
-
-The Rails upgrade experts. We've been upgrading Rails applications professionally since 2017, helping companies stay current and secure.
-
----
-
-**Questions?** Open an issue or reach out to us at [hello@ombulabs.com](mailto:hello@ombulabs.com)
+This is a fork of [OmbuLabs.ai's `claude-code_rails-upgrade-skill`](https://github.com/ombulabs/claude-code_rails-upgrade-skill), updated to support the [bootboot](https://github.com/Shopify/bootboot) Bundler plugin as the dual-boot mechanism instead of `next_rails`. The original methodology is from [FastRuby.io](https://fastruby.io)'s ["The Complete Guide to Upgrade Rails"](https://www.fastruby.io/upgrade) and the OmbuLabs team's Rails upgrade work since 2017 — all credit for the underlying skill design goes to them.
