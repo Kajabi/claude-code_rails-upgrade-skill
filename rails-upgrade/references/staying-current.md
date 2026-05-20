@@ -70,13 +70,6 @@ workflows:
 language: ruby
 cache: bundler
 
-rvm:
-  - 3.2.0
-
-env:
-  - DEPENDENCIES_NEXT=
-  - DEPENDENCIES_NEXT=1
-
 services:
   - postgresql
 
@@ -87,8 +80,17 @@ before_script:
 script:
   - bundle exec rspec
 
-# Allow next version failures (informational only)
+# Use jobs.include so the "current" entry has NO env line — leaving
+# DEPENDENCIES_NEXT unset (nil/falsy) in Ruby. Do NOT use Travis's
+# list-form `env:` matrix here: `DEPENDENCIES_NEXT=` exports an empty
+# string, which Ruby treats as truthy, and the code-level dual-boot
+# guard `if ENV["DEPENDENCIES_NEXT"]` would take the next-version path
+# on the "current" lockfile.
 jobs:
+  include:
+    - rvm: 3.2.0
+    - rvm: 3.2.0
+      env: DEPENDENCIES_NEXT=1
   allow_failures:
     - env: DEPENDENCIES_NEXT=1
 ```

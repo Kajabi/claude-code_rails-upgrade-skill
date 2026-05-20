@@ -164,7 +164,10 @@ turbo-sprockets-rails3 0.3.14 - new version not found
 | "with no new versions" | blockers | Vendor / fork / replace — gem is abandoned or pre-extraction |
 | (gem not listed in any section) | already compatible | Note the locked version; no action |
 
-If the command produces no output at all, or if the output contains no `=> incompatible with rails X` headers despite an exit code of 0, treat it as `bundle_report` failing or producing an unparseable result — fall back to the railsbump output rather than assuming "all gems compatible." A future `next_rails` release that reformats the output would otherwise silently produce empty buckets.
+If the command produces no output at all, or if the output contains no `=> incompatible with rails X` headers despite an exit code of 0, treat it as `bundle_report` failing or producing an unparseable result — do **not** assume "all gems compatible." A future `next_rails` release that reformats the output would otherwise silently produce empty buckets. How to recover depends on why `bundle_report` was running in the first place (the orchestrator condition from "Two checks, one orchestrator" above):
+
+- **If you got here because railsbump returned `unknown` for some gems or the user asked for cross-validation** (conditions 2–4): railsbump output exists. Use whatever railsbump produced and apply the Reconciliation section below.
+- **If you got here because railsbump was unreachable / errored / stalled** (condition 1): both checks are now inconclusive. There is no railsbump output to fall back to. Surface this state to the user, flag every gem as a "pending information" blocker, and recommend manual gemspec inspection or rerunning railsbump later. Do not silently proceed as if the gem set were compatible.
 
 ---
 
