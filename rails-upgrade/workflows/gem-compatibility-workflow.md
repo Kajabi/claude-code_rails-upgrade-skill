@@ -8,70 +8,33 @@
 
 ## Two checks, one orchestrator
 
-The orchestrator picks **one primary** and only escalates to secondary when needed. Don't run both by default.
+The orchestrator picks **one primary** and only escalates to the optional alternative when needed. Don't run both by default.
 
 | Check | Source | Strengths | Weaknesses |
 |---|---|---|---|
-| **Primary**: `bundle_report compatibility` | `next_rails` (local CLI) | Synchronous, pre-bucketed output, gives upgrade target version per gem, no third-party uptime concern | Reads gemspec metadata only — can miss transitive resolution conflicts |
-| **Secondary**: railsbump.org API | `https://api.railsbump.org` | Tests actual lockfile resolution graph against a real Rails release | Async (30-600s polling), depends on third-party uptime, occasional `unknown` results |
+| **Primary**: railsbump.org API | `https://api.railsbump.org` | Tests the actual lockfile resolution graph against a real Rails release; available with no local install (this skill assumes bootboot, which does not ship `bundle_report`) | Async (30-600s polling), depends on third-party uptime, occasional `unknown` results |
+| **Optional alternative**: `bundle_report compatibility` | `next_rails` (local CLI, installed separately by the user) | Synchronous, pre-bucketed output, gives upgrade target version per gem, no third-party uptime concern | Reads gemspec metadata only — can miss transitive resolution conflicts; requires the user to have `next_rails` available even though the dual-boot mechanism is bootboot |
 
-Reach for the secondary only when:
+Reach for the optional alternative only when:
 
-1. `bundle_report` cannot run (next_rails not installed; `bundle exec` fails in the env).
-2. `bundle_report` reports a gem under "no new compatible versions" and the user wants a second opinion before forking/replacing it.
-3. The user explicitly asks for cross-validation.
-4. There is reason to suspect a transitive resolution conflict.
+1. Railsbump is unreachable, returns errors, or stalls past the polling cap.
+2. The user already has `next_rails` installed and wants the synchronous offline check.
+3. Railsbump returned `unknown` on a gem and the user wants a second opinion before treating it as a blocker.
+4. The user explicitly asks for cross-validation.
 
----
-
-## Primary: `bundle_report compatibility`
-
-```bash
-bundle exec bundle_report compatibility --rails-version=<target>
-```
-
-Requires `next_rails` installed in the project (the dual-boot skill installs it in Step 2 of the high-level workflow) and network access (Bundler fetches gem metadata).
-
-### Output shape
-
-`bundle_report` prints three sections. Output is stable; parse with regex.
-
-```
-=> incompatible with rails X (with new versions that are compatible):
-these gems will need to be upgraded before upgrading to rails X.
-
-paper_trail 2.7.2 - upgrade to 7.1.3
-simple_form 2.1.3 - upgrade to 3.2.0
-...
-
-=> incompatible with rails X (with no new compatible versions):
-these gems will need to be removed or replaced before upgrading to rails X.
-
-rails3_acts_as_paranoid 0.1.1 (loaded from git) - new version, 0.2.5, is not compatible with rails X
-
-=> incompatible with rails X (with no new versions):
-these gems will need to be upgraded by us or removed before upgrading to rails X.
-
-strong_parameters 0.2.3 - new version not found
-turbo-sprockets-rails3 0.3.14 - new version not found
-```
-
-### Bucket mapping
-
-| `bundle_report` section | Bucket | Plan |
-| --- | --- | --- |
-| "with new versions that are compatible" | required bumps | `bundle update <gem> --conservative` to the listed target version |
-| "with no new compatible versions" | blockers | Replace gem, fork the in-flight PR, or drop the dependency |
-| "with no new versions" | blockers | Vendor / fork / replace — gem is abandoned or pre-extraction |
-| (gem not listed in any section) | already compatible | Note the locked version; no action |
-
-If the command produces no output at all, or if the output contains no `=> incompatible with rails X` headers despite an exit code of 0, treat it as `bundle_report` failing or producing an unparseable result — escalate to the secondary check rather than assuming "all gems compatible." A future `next_rails` release that reformats the output would otherwise silently produce empty buckets.
+If `next_rails` is not installed and railsbump is unavailable, surface that to the user and stop — do not silently degrade. Manual inspection of each gem's gemspec is the fallback the user must approve.
 
 ---
 
-## Secondary: railsbump API
+## Primary: railsbump API
 
-Use only when the orchestrator triggered the secondary path (see "Two checks, one orchestrator" above).
+Hit railsbump.org's hosted compatibility check with the lockfile (`Gemfile.lock` for the current side, `Gemfile_next.lock` for the next side under bootboot).
+
+### Why railsbump is primary
+
+This skill's dual-boot mechanism is the [bootboot](https://github.com/Shopify/bootboot) Bundler plugin, which does not ship `bundle_report`. `bundle_report compatibility` is a `next_rails` CLI and only available when the user has `next_rails` installed alongside bootboot — many bootboot users do not. Railsbump is the check that works for every bootboot project out of the box.
+
+(See the "Optional alternative" section further down for the `bundle_report` path when the user does have `next_rails` installed.)
 
 ### POST `/lockfiles`
 
@@ -158,9 +121,59 @@ The API may return multiple `lockfile_checks` (one per Rails release it tested a
 
 ---
 
+## Optional alternative: `bundle_report compatibility`
+
+Use only when the orchestrator triggered the alternative path (see "Two checks, one orchestrator" above) and the user has `next_rails` installed as a standalone CLI. The bootboot Bundler plugin does not include `bundle_report`; it ships with `next_rails`, which a user can install independently of dual-boot.
+
+```bash
+bundle exec bundle_report compatibility --rails-version=<target>
+```
+
+Requires `next_rails` available in the project's bundle (or installed globally and run outside `bundle exec`) and network access (Bundler fetches gem metadata).
+
+### Output shape
+
+`bundle_report` prints three sections. Output is stable; parse with regex.
+
+```
+=> incompatible with rails X (with new versions that are compatible):
+these gems will need to be upgraded before upgrading to rails X.
+
+paper_trail 2.7.2 - upgrade to 7.1.3
+simple_form 2.1.3 - upgrade to 3.2.0
+...
+
+=> incompatible with rails X (with no new compatible versions):
+these gems will need to be removed or replaced before upgrading to rails X.
+
+rails3_acts_as_paranoid 0.1.1 (loaded from git) - new version, 0.2.5, is not compatible with rails X
+
+=> incompatible with rails X (with no new versions):
+these gems will need to be upgraded by us or removed before upgrading to rails X.
+
+strong_parameters 0.2.3 - new version not found
+turbo-sprockets-rails3 0.3.14 - new version not found
+```
+
+### Bucket mapping
+
+| `bundle_report` section | Bucket | Plan |
+| --- | --- | --- |
+| "with new versions that are compatible" | required bumps | `bundle update <gem> --conservative` to the listed target version |
+| "with no new compatible versions" | blockers | Replace gem, fork the in-flight PR, or drop the dependency |
+| "with no new versions" | blockers | Vendor / fork / replace — gem is abandoned or pre-extraction |
+| (gem not listed in any section) | already compatible | Note the locked version; no action |
+
+If the command produces no output at all, or if the output contains no `=> incompatible with rails X` headers despite an exit code of 0, treat it as `bundle_report` failing or producing an unparseable result — do **not** assume "all gems compatible." A future `next_rails` release that reformats the output would otherwise silently produce empty buckets. How to recover depends on why `bundle_report` was running in the first place (the orchestrator condition from "Two checks, one orchestrator" above):
+
+- **If you got here because railsbump returned `unknown` for some gems or the user asked for cross-validation** (conditions 2–4): railsbump output exists. Use whatever railsbump produced and apply the Reconciliation section below.
+- **If you got here because railsbump was unreachable / errored / stalled** (condition 1): both checks are now inconclusive. There is no railsbump output to fall back to. Surface this state to the user, flag every gem as a "pending information" blocker, and recommend manual gemspec inspection or rerunning railsbump later. Do not silently proceed as if the gem set were compatible.
+
+---
+
 ## Reconciliation (when both checks ran)
 
-When the orchestrator triggered the secondary because of an ambiguous primary result, both signals exist. Reconcile per gem:
+When the orchestrator triggered the alternative because of an ambiguous primary result, both signals exist. Reconcile per gem:
 
 - **Both agree the gem is compatible** → no action.
 - **Both agree the gem needs a bump** → use the higher of the two target versions as the minimum bump.
@@ -174,7 +187,7 @@ When the orchestrator triggered the secondary because of an ambiguous primary re
 
 Whichever check ran, the output handed to Step 5 is the same three buckets:
 
-1. **Blockers** — incompatible gems with no compatible version, plus any gems where railsbump returned `unknown`/errored and `bundle_report` did not give a clean answer. The hop cannot complete until each one is resolved (see `references/gem-compatibility.md` for the playbook). Mark "pending information" blockers separately so the user knows they may turn into "compatible" or "required bumps" once the missing data lands.
+1. **Blockers** — incompatible gems with no compatible version, plus any gems where railsbump returned `unknown`/errored and the optional `bundle_report` check did not run or did not give a clean answer. The hop cannot complete until each one is resolved (see `references/gem-compatibility.md` for the playbook). Mark "pending information" blockers separately so the user knows they may turn into "compatible" or "required bumps" once the missing data lands.
 2. **Required bumps** — incompatible gems with a target version. Order top-level gems before their internal dependencies, so bundler can resolve the graph from the root. Example: bump `rspec-rails` before `rspec-mocks` — `rspec-rails` is the gem your Gemfile names directly, and it pulls `rspec-mocks` (and the rest of the rspec-* family) transitively.
 3. **Already compatible** — no action needed, but note the locked version so the user can see headroom.
 
@@ -184,7 +197,7 @@ When the agent later runs the actual `bundle update`, prefer one gem at a time (
 
 ## Caveats
 
-- **Both checks need network.** `bundle_report` fetches gem metadata via Bundler; railsbump is a hosted service. Tell the user when either was skipped due to network failure — do not silently degrade.
+- **Both checks need network.** Railsbump is a hosted service; `bundle_report` fetches gem metadata via Bundler. Tell the user when either was skipped due to network failure — do not silently degrade.
 - **Slugs expire.** Don't store railsbump slugs across sessions. Re-POST the lockfile if the user comes back later.
 - **Compatibility ≠ green tests.** A `compatible` result means "the gem's gemspec accepts the target Rails" (and for railsbump, "the lockfile resolves"). Tests are still the ground truth.
 - **Submit each lockfile once per session.** Cache the slug in conversation context.

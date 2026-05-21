@@ -210,19 +210,29 @@ end
 ### Phase 1: Preparation
 ```bash
 git checkout -b rails-61-upgrade
-
-# Set up dual-boot
-gem install next_rails
-next_rails --init
 ```
+
+Then set up dual-boot with the [bootboot](https://github.com/Shopify/bootboot) Bundler plugin (see `rails-upgrade/SKILL.md` → "CRITICAL: Dual-Boot Setup with bootboot" for the full snippet):
+
+```ruby
+# Gemfile (top)
+plugin "bootboot", "~> 0.2.2" if !ENV["RAILS_ENV"] || ENV["RAILS_ENV"] == "test" || ENV["ENABLE_BOOTBOOT"]
+Plugin.send(:load_plugin, "bootboot") if Plugin.installed?("bootboot")
+
+if ENV["DEPENDENCIES_NEXT"] == "1"
+  enable_dual_booting if Plugin.installed?("bootboot")
+end
+```
+
+Then run `bundle install && bundle bootboot` once.
 
 ### Phase 2: Gemfile Updates
 ```ruby
 # Gemfile
-if next?
-  gem 'rails', '~> 6.1.0'
+if ENV["DEPENDENCIES_NEXT"] == "1"
+  gem "rails", "~> 6.1.0"
 else
-  gem 'rails', '~> 6.0.0'
+  gem "rails", "~> 6.0.0"
 end
 ```
 

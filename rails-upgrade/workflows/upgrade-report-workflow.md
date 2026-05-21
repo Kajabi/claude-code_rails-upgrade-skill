@@ -123,10 +123,10 @@ For each issue found in findings:
 {ACTUAL_CODE_FROM_USER_FILES}
 \```
 
-#### Required Change (After — Dual-Boot with `NextRails.next?`)
+#### Required Change (After — Dual-Boot with `ENV["DEPENDENCIES_NEXT"]`)
 \```ruby
-# Dual-boot compatible: uses NextRails.next? (NOT respond_to?)
-if NextRails.next?
+# Dual-boot compatible: matches bootboot's env var (NOT respond_to?)
+if ENV["DEPENDENCIES_NEXT"]
   {FIXED_CODE_FOR_TARGET_VERSION}
 else
   {ORIGINAL_CODE_FOR_CURRENT_VERSION}
@@ -141,9 +141,12 @@ end
 ⚠️ **Custom Code Warning:** {WARNING_IF_APPLICABLE}
 ```
 
-> **Note:** All code examples use `NextRails.next?` for dual-boot compatibility.
-> Never use `respond_to?` for version branching — it is hard to understand, hard to
-> maintain, and obscures the intent of the code. See SKILL.md for details.
+> **Note:** All code examples use `ENV["DEPENDENCIES_NEXT"]` for dual-boot compatibility.
+> Bootboot reads the same env var to pick a lockfile, so the boot-time gate and the
+> code-time gate stay aligned. Never use `respond_to?` for version branching — it is
+> hard to understand, hard to maintain, and obscures the intent of the code. If a
+> project wraps the check in a helper (e.g. `AppConfig.dependencies_next?`), use the
+> helper in examples for that project. See SKILL.md for details.
 
 #### Section 3: Step-by-Step Migration Plan
 

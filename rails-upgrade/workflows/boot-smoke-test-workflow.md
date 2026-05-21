@@ -2,7 +2,7 @@
 
 **When to run:** Step 4.6 of the upgrade workflow, after gem-compat (Step 4.5) and before report generation (Step 5).
 
-**Why this step exists:** Step 4 (codebase grep) only sees the user's own code. Step 4.5 (`next_rails bundle_report compatibility` / railsbump) only sees declared dependency constraints. Neither can detect a gem that resolves cleanly under the target Rails version but then crashes at boot because it calls a removed method or requires a removed file.
+**Why this step exists:** Step 4 (codebase grep) only sees the user's own code. Step 4.5 (railsbump API / optional `bundle_report compatibility`) only sees declared dependency constraints. Neither can detect a gem that resolves cleanly under the target Rails version but then crashes at boot because it calls a removed method or requires a removed file.
 
 A booted Rails process is the only signal that catches that class of failure.
 
@@ -19,19 +19,19 @@ In both cases the gem ships in default Rails-generated apps and the user did not
 
 ### 1. Pick a boot trigger
 
-Anything that loads `config/application.rb` is sufficient. Cheapest options first:
+Anything that loads `config/application.rb` under the next dependency set is sufficient. Cheapest options first:
 
 ```bash
 # Cheapest: just boot the framework
-BUNDLE_GEMFILE=Gemfile.next bundle exec rails runner "puts Rails.version"
+DEPENDENCIES_NEXT=1 bundle exec rails runner "puts Rails.version"
 
 # Slightly heavier: load the test environment without running specs
-BUNDLE_GEMFILE=Gemfile.next bundle exec rspec --dry-run
+DEPENDENCIES_NEXT=1 bundle exec rspec --dry-run
 
 # Heaviest but most thorough: full suite under target Rails
-BUNDLE_GEMFILE=Gemfile.next bundle exec rspec
+DEPENDENCIES_NEXT=1 bundle exec rspec
 # or
-BUNDLE_GEMFILE=Gemfile.next bundle exec rails test
+DEPENDENCIES_NEXT=1 bundle exec rails test
 ```
 
 Use `rails runner` first. If it boots cleanly, escalate to the full test suite — that catches gems whose problematic code only loads under a specific environment (e.g. test-only gems, eager-load-only paths).
@@ -68,11 +68,11 @@ For each offending gem:
    - The exact failure (`LoadError` / `NoMethodError` / etc.)
    - The minimum compatible version
    - Why a static check missed it (no upper bound declared)
-4. Bump the floor in the Gemfile (`gem "<gem>", "~> <new-floor>"`) and re-run `bundle install` for both lockfiles.
+4. Bump the floor in the Gemfile (`gem "<gem>", "~> <new-floor>"`, placing it inside the `if ENV["DEPENDENCIES_NEXT"]` branch if only the next side needs the bump) and re-run `bundle install` — bootboot will refresh both `Gemfile.lock` and `Gemfile_next.lock` in one pass.
 
 ### 4. Re-run boot
 
-Repeat steps 1–3 until boot succeeds under `Gemfile.next`. Then proceed to Step 5.
+Repeat steps 1–3 until boot succeeds under `DEPENDENCIES_NEXT=1`. Then proceed to Step 5.
 
 ## Output
 
@@ -81,7 +81,7 @@ A short report block to merge into Step 5's Comprehensive Upgrade Report:
 ```
 Boot smoke test (Step 4.6):
 
-  - Triggered: BUNDLE_GEMFILE=Gemfile.next bundle exec rspec --dry-run
+  - Triggered: DEPENDENCIES_NEXT=1 bundle exec rspec --dry-run
   - Result: PASS / FAIL with N gem bumps required
 
 If FAIL → bumps required (added to fix-before-bump):
@@ -94,4 +94,4 @@ If the smoke test passes on the first run, record that explicitly — it is a po
 ## Notes
 
 - The smoke test does not replace the post-bump test suite run in Step 6. It is a *boot* check, not a feature check. Step 6 still runs the full suite against both versions.
-- Skip this step only if there is no Gemfile.next yet (very early in dual-boot setup). In all other cases, run it.
+- Skip this step only if `Gemfile_next.lock` does not yet exist (very early in dual-boot setup — `bundle bootboot` hasn't run). In all other cases, run it.

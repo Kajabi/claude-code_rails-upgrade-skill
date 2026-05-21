@@ -17,7 +17,7 @@ This file captures project-specific conventions Claude should follow when workin
 - Base content on primary sources: the official Rails upgrade guide, the FastRuby.io blog, the OmbuLabs ebook chapter, and RailsDiff for the matching versions.
 - Organize breaking changes under 🔴 HIGH / 🟡 MEDIUM / 🟢 LOW priority sections.
 - Each breaking change entry should include: "What Changed", a detection pattern, and a BEFORE/AFTER fix.
-- Use `NextRails.next?` (never `respond_to?` or `Gem::Version` comparisons) in dual-boot code examples.
+- Use `ENV["DEPENDENCIES_NEXT"]` (never `respond_to?` or `Gem::Version` comparisons) in dual-boot code examples. This matches the bootboot Bundler plugin the skill assumes, so the env var that picks the lockfile is the same env var application code branches on. If a project wraps the check in a helper (e.g. `AppConfig.dependencies_next?`), it is fine for that project's examples to reference the helper instead.
 
 ## Detection patterns (`rails-upgrade/detection-scripts/patterns/rails-*-patterns.yml`)
 

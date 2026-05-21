@@ -246,14 +246,14 @@ Milestone 4: Rails 8.1 (Latest)
 
 ## Dual-Boot Strategy (Optional)
 
-For large applications, consider dual-boot testing:
+For large applications, consider dual-boot testing with the [bootboot](https://github.com/Shopify/bootboot) Bundler plugin (see `rails-upgrade/SKILL.md` → "CRITICAL: Dual-Boot Setup with bootboot" for the full setup):
 
 ```ruby
 # Gemfile
-if next?
-  gem 'rails', '~> 7.0'
+if ENV["DEPENDENCIES_NEXT"] == "1"
+  gem "rails", "~> 7.0"
 else
-  gem 'rails', '~> 6.1'
+  gem "rails", "~> 6.1"
 end
 ```
 
@@ -262,7 +262,7 @@ end
 bundle exec rspec
 
 # Run next version
-BUNDLE_GEMFILE=Gemfile.next bundle exec rspec
+DEPENDENCIES_NEXT=1 bundle exec rspec
 ```
 
 **Benefits:**

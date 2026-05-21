@@ -10,9 +10,11 @@ Congratulations on completing your Rails upgrade! Now the goal is to never fall 
 
 ---
 
-## Continuous Integration with Dual-Boot
+## Continuous Integration with Dual-Boot (bootboot)
 
 Set up your CI to run tests against both your current Rails version and the next version. This way you're always prepared for the next upgrade.
+
+These examples assume the [bootboot](https://github.com/Shopify/bootboot) Bundler plugin is already wired into `Gemfile` (one Gemfile, two lockfiles — `Gemfile.lock` and `Gemfile_next.lock`). The "next" job sets `DEPENDENCIES_NEXT=1`, which tells bootboot to resolve against `Gemfile_next.lock`.
 
 ### CircleCI Configuration
 
@@ -41,7 +43,7 @@ jobs:
         environment:
           RAILS_ENV: test
           DATABASE_URL: postgres://postgres@localhost/myapp_test
-          BUNDLE_GEMFILE: Gemfile.next
+          DEPENDENCIES_NEXT: "1"
       - image: cimg/postgres:14.0
     steps:
       - checkout
@@ -68,13 +70,6 @@ workflows:
 language: ruby
 cache: bundler
 
-rvm:
-  - 3.2.0
-
-gemfile:
-  - Gemfile
-  - Gemfile.next
-
 services:
   - postgresql
 
@@ -85,10 +80,19 @@ before_script:
 script:
   - bundle exec rspec
 
-# Allow next version failures (informational only)
+# Use jobs.include so the "current" entry has NO env line — leaving
+# DEPENDENCIES_NEXT unset (nil/falsy) in Ruby. Do NOT use Travis's
+# list-form `env:` matrix here: `DEPENDENCIES_NEXT=` exports an empty
+# string, which Ruby treats as truthy, and the code-level dual-boot
+# guard `if ENV["DEPENDENCIES_NEXT"]` would take the next-version path
+# on the "current" lockfile.
 jobs:
+  include:
+    - rvm: 3.2.0
+    - rvm: 3.2.0
+      env: DEPENDENCIES_NEXT=1
   allow_failures:
-    - gemfile: Gemfile.next
+    - env: DEPENDENCIES_NEXT=1
 ```
 
 ### GitHub Actions Configuration
@@ -130,7 +134,7 @@ jobs:
     env:
       RAILS_ENV: test
       DATABASE_URL: postgres://postgres:postgres@localhost/myapp_test
-      BUNDLE_GEMFILE: Gemfile.next
+      DEPENDENCIES_NEXT: "1"
 
     services:
       postgres:
@@ -221,19 +225,17 @@ Stay ahead of releases by testing against Rails' main branch:
 ### Gemfile Configuration
 
 ```ruby
-# Gemfile
+# Gemfile (with bootboot wired up — see SKILL.md)
 
-def next?
-  File.basename(__FILE__) == "Gemfile.next"
-end
-
-if next?
+if ENV["DEPENDENCIES_NEXT"] == "1"
   # Test against Rails main branch
-  gem 'rails', github: 'rails/rails', branch: 'main'
+  gem "rails", github: "rails/rails", branch: "main"
 else
-  gem 'rails', '~> 7.1.0'
+  gem "rails", "~> 7.1.0"
 end
 ```
+
+Run the main-branch tests locally with `DEPENDENCIES_NEXT=1 bundle exec rspec`. In CI, set `DEPENDENCIES_NEXT=1` on the experimental matrix entry as shown above.
 
 ### When to Test Against Main
 
@@ -369,8 +371,8 @@ bundle update
 ### CI Environment Variables
 
 ```bash
-# Run with next Rails version
-BUNDLE_GEMFILE=Gemfile.next bundle exec rspec
+# Run with next Rails version (under bootboot's dual-boot)
+DEPENDENCIES_NEXT=1 bundle exec rspec
 
 # Enable deprecation warnings
 RUBYOPT="-W:deprecated" bundle exec rspec
@@ -383,4 +385,5 @@ RUBYOPT="-W:deprecated" bundle exec rspec
 - [RailsBump](https://railsbump.org/) - Gem compatibility checker
 - [RailsDiff](https://railsdiff.org/) - Compare Rails versions
 - [FastRuby.io Blog](https://www.fastruby.io/blog) - Upgrade guides and tips
-- [next_rails gem](https://github.com/fastruby/next_rails) - Dual-boot tool
+- [bootboot](https://github.com/Shopify/bootboot) - Bundler plugin used as this skill's dual-boot mechanism
+- [next_rails gem](https://github.com/fastruby/next_rails) - Optional CLI for `bundle_report compatibility` (alternative gem-compat check)
