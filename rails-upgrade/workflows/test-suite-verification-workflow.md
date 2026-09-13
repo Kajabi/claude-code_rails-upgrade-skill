@@ -47,6 +47,38 @@ fi
 
 ### Step 2: Run the Test Suite
 
+#### 2a. Sweep for deprecation-behavior overrides
+
+Before running the suite, grep for places that change deprecation behavior (raise / silence / disallow) so test results can be interpreted correctly. The obvious places (`config/application.rb`, `config/environments/*.rb`) are not enough. Apps also use the `config.active_support.deprecation =` env DSL, Rails 7.1+ apps use the `deprecators` registry, RSpec autoloads `-r` requires from `.rspec`, and test helpers can install hooks like `RSpec.configure { |c| c.raise_errors_for_deprecations! }`. Miss those and a "the upgrade broke tests" report can really be "every deprecation has been raising for months."
+
+Sweep these locations:
+
+- `config/application.rb`, `config/environments/*.rb`, `config/initializers/*.rb`
+- `.rspec`, `spec/.rspec` (look for `-r raise_errors_for_deprecations` and similar autoloads)
+- `spec/spec_helper.rb`, `spec/rails_helper.rb`, `spec/support/**/*.rb`
+- `test/test_helper.rb`, `test/support/`, `test/minitest/` (Minitest apps)
+- `Rakefile`, `lib/tasks/*.rake`
+- Any Bundler-loaded test-group gem that wires deprecation behavior
+
+```bash
+grep -rnE "raise_errors_for_deprecations|(ActiveSupport::Deprecation|Rails\.application\.deprecators|[A-Z]\w*\.deprecator)\.(behavior|disallowed_behavior|silenced)\s*=|(ActiveSupport::Deprecation|Rails\.application\.deprecators|[A-Z]\w*\.deprecator)\.silence\b|config\.active_support\.(deprecation|disallowed_deprecation|disallowed_deprecation_warnings|report_deprecations)\s*=" \
+  .rspec spec/.rspec spec/spec_helper.rb spec/rails_helper.rb Rakefile \
+  config/ spec/support/ lib/tasks/ \
+  test/test_helper.rb test/support/ test/minitest/ 2>/dev/null
+```
+
+The trailing `silence\b` alternation catches the block form `ActiveSupport::Deprecation.silence do ... end`, which scopes silencing to a noisy call site and is otherwise easy to miss. The `\b` word boundary excludes `silenced` (already covered by the assignment branch).
+
+Which forms appear depends on the app's Rails version:
+
+- `config.active_support.deprecation=` / `ActiveSupport::Deprecation.behavior=` — Rails 3+ (classic global config)
+- `.rspec` `-r raise_errors_for_deprecations` / `raise_errors_for_deprecations!` — RSpec hook, any version
+- `Rails.application.deprecators` / `<Framework>.deprecator` (e.g. `ActiveRecord.deprecator`) — Rails 7.1+ (deprecators registry)
+
+Running this against a Rails 5–7.0 app and seeing no `deprecators` hits is expected, not a gap.
+
+#### 2b. Run the suite
+
 Execute the appropriate test command:
 
 **For RSpec:**
@@ -157,14 +189,15 @@ Could not find:
 - spec/ directory (RSpec)
 - test/ directory (Minitest)
 
-This is a significant risk for upgrading. Consider:
-1. Adding test coverage before upgrading
-2. Proceeding with extra manual testing (not recommended)
+This is a significant risk for upgrading. Before proceeding:
+1. Run the no-test-suite smoke baseline in `workflows/no-test-suite-smoke-workflow.md`
+2. Record boot, routes, migration-status, and asset/build results
+3. Recommend adding focused test coverage before or during the first upgrade hop
 
-Do you want to proceed without tests? (This is risky)
+Do you want to proceed with only a smoke baseline? (This is risky)
 ```
 
-**Action:** Warn user strongly, but allow them to proceed if they acknowledge the risk.
+**Action:** Load `workflows/no-test-suite-smoke-workflow.md`, run the safe read-only baseline checks, and mark baseline confidence as `partial` if they pass. If any boot/routes check fails, stop the upgrade until the baseline is fixed or the user explicitly accepts the blocker.
 
 #### Tests Take Too Long (> 10 minutes)
 
@@ -351,6 +384,7 @@ Before proceeding past this step:
 - [ ] Test suite executed successfully
 - [ ] All tests pass (0 failures)
 - [ ] Baseline metrics recorded
+- [ ] If no suite exists: no-test-suite smoke baseline recorded as `partial`
 - [ ] User informed of results
 - [ ] If failures: user understands they must fix tests first
 

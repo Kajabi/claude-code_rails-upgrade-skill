@@ -219,6 +219,7 @@ If user requests a multi-hop upgrade (e.g., 5.2 → 8.1):
 
 ### Workflow Guides (Load when generating deliverables)
 - `workflows/test-suite-verification-workflow.md` - **MANDATORY FIRST STEP** - How to run and verify test suite
+- `workflows/no-test-suite-smoke-workflow.md` - **Load from Step 1 when no runnable RSpec/Minitest suite exists** - Rails boot, routes, migration-status, and build smoke baseline with partial-confidence reporting
 - `workflows/direct-detection-workflow.md` - How to run breaking change detection directly
 - `workflows/upgrade-report-workflow.md` - How to generate upgrade reports
 - `workflows/gem-compatibility-workflow.md` - **Load in Step 4.5** - Per-lockfile gem compatibility check against the target Rails version. Documents the primary (railsbump.org API), the optional offline alternative (`bundle_report compatibility` from `next_rails`, available when the user has the CLI installed separately), and how to reconcile their output.
@@ -242,6 +243,7 @@ If user requests a multi-hop upgrade (e.g., 5.2 → 8.1):
 - `references/multi-hop-strategy.md` - Multi-version planning
 - `references/testing-checklist.md` - Comprehensive testing
 - `references/gem-compatibility.md` - Gem update order and the "no compatible version" playbook (fork / vendor / replace). Load only when Step 4.5's compatibility check produced blockers.
+- `references/js-compressor-sprockets-mismatch.md` - Keeping terser / closure-compiler working when the target Rails pins Sprockets to the 2.x line. Load only when JS_COMPRESSOR_GEM_MISMATCH fires.
 
 ### Detection Pattern Resources
 - `detection-scripts/patterns/rails-*.yml` - Version-specific patterns for direct detection
@@ -284,12 +286,17 @@ When user requests an upgrade, follow this workflow:
 2. Detect test framework (RSpec, Minitest, or both)
 3. Run test suite with: bundle exec rspec OR bundle exec rails test
 4. Capture results: total tests, passing, failing, pending
-5. If ANY tests fail:
+5. If no runnable test suite exists:
+   - Load: workflows/no-test-suite-smoke-workflow.md
+   - Run the safe read-only smoke baseline: Rails boot, test-env boot when possible, routes load, migration status, and asset/build command if present
+   - Record baseline confidence as partial
+   - Continue only if boot/routes checks pass and the user accepts the risk of proceeding without real tests
+6. If ANY tests fail:
    - STOP the upgrade process
    - Report failing tests to user
    - Offer to help fix failing tests
    - Do NOT proceed until all tests pass
-6. If all tests pass:
+7. If all tests pass:
    - Record baseline metrics (test count, coverage if available)
    - Proceed to Step 2
 ```
