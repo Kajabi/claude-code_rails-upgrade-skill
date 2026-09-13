@@ -190,7 +190,7 @@ belongs_to :activity, query_constraints: [:activity_id, :school_id]
 belongs_to :activity, foreign_key: [:activity_id, :school_id]
 ```
 
-This is **behavior-preserving and version-agnostic**: when `foreign_key:` is given an `Array`, ActiveRecord internally maps it back to `query_constraints` (in both 7.2 and 8.0), so no dual-boot (`NextRails.next?`) branch is needed. On 7.2 it also silences the deprecation warning.
+This is **behavior-preserving and version-agnostic**: when `foreign_key:` is given an `Array`, ActiveRecord internally maps it back to `query_constraints` (in both 7.2 and 8.0), so no dual-boot (`ENV["DEPENDENCIES_NEXT"]`) branch is needed. On 7.2 it also silences the deprecation warning.
   
 > ⚠️ Not in the official Rails Upgrade Guide or the 7.2/8.0 release notes — documented only in `activerecord` `CHANGELOG.md` (7.2) and the source. A **boot smoke test** (`bin/rails runner`) is the reliable way to catch it.
 

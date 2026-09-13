@@ -13,7 +13,7 @@ If the app uses plain `uglifier`, you do not need this file. The standard
 
 Modern JS-compressor gems (terser, closure-compiler) `require "sprockets/digest_utils"` from
 their railtie. That file exists only in **Sprockets >= 3**. Rails 4.0 pins Sprockets to **2.x**.
-The next bundle *resolves* fine (so `railsbump` / `next_rails` report nothing), but at **boot**
+The next bundle *resolves* fine (so `railsbump` / `bundle_report` report nothing), but at **boot**
 Bundler auto-requires the gem, the railtie runs, and you get:
 
 ```
@@ -108,13 +108,13 @@ Once the app is fully on a Rails version that ships Sprockets 3/4, unwind the wo
 2. Drop `require: false` on terser — Sprockets 3/4 integrates `Terser::Compressor` natively via
    the railtie.
 3. Delete the rake-task swap — terser registers itself.
-4. Remove the `:uglifier` assignment / any `NextRails.next?` guards in env configs.
+4. Remove the `:uglifier` assignment / any `ENV["DEPENDENCIES_NEXT"]` guards in env configs.
 
 ---
 
 ## Notes
 
-- Use `NextRails.next?` for any runtime branching, never `respond_to?` or `Gem::Version`
+- Use `ENV["DEPENDENCIES_NEXT"]` for any runtime branching, never `respond_to?` or `Gem::Version`
   comparisons.
 - The exact hop where this bites is wherever Sprockets is still pinned to 2.x — for the
   3.2 → 4.0 upgrade that is the 4.0 side. An app that already has Sprockets 3/4 will not hit it.

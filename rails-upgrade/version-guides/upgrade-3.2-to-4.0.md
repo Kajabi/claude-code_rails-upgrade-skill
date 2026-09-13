@@ -407,7 +407,7 @@ grep -rn "embed_authenticity_token_in_remote_forms" config/
 
 # true on the current boot and false on the next confirms it relies on the default
 bundle exec rails runner 'puts ActionView::Helpers::FormTagHelper.embed_authenticity_token_in_remote_forms.inspect'
-BUNDLE_GEMFILE=Gemfile.next bundle exec rails runner 'puts ActionView::Helpers::FormTagHelper.embed_authenticity_token_in_remote_forms.inspect'
+DEPENDENCIES_NEXT=1 bundle exec rails runner 'puts ActionView::Helpers::FormTagHelper.embed_authenticity_token_in_remote_forms.inspect'
 ```
 
 Remote `link_to` / `button_to` links are safe: UJS builds their form and token itself.
@@ -421,7 +421,7 @@ The grep is a list of forms to audit, not a list of forms to change.
 config.action_view.embed_authenticity_token_in_remote_forms = true
 ```
 
-Valid on both 3.2 and 4.x, so no `NextRails.next?` branch. The pin is a backstop, not
+Valid on both 3.2 and 4.x, so no `ENV["DEPENDENCIES_NEXT"]` branch. The pin is a backstop, not
 the whole fix. Any `fetch` / `XMLHttpRequest` that posts form data itself still needs
 the token set explicitly:
 
