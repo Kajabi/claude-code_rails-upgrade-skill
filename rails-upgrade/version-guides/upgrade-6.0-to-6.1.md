@@ -224,7 +224,7 @@ if ENV["DEPENDENCIES_NEXT"] == "1"
 end
 ```
 
-Then run `bundle install && bundle bootboot` once.
+Then run `bundle install`, `cp Gemfile.lock Gemfile_next.lock`, and `DEPENDENCIES_NEXT=1 bundle install` once. Do not run `bundle bootboot` after hand-writing the block above; it appends a second copy (see `rails-upgrade/SKILL.md`).
 
 ### Phase 2: Gemfile Updates
 ```ruby

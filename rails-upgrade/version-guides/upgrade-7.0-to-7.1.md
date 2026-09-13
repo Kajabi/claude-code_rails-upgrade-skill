@@ -287,6 +287,26 @@ config.active_record.attributes_for_inspect = [:id, :name, :email]
 config.active_record.attributes_for_inspect = :all
 ```
 
+#### 12. `ActiveRecord::Migration.check_pending!` Deprecated
+
+**What Changed:**
+`ActiveRecord::Migration.check_pending!` is deprecated in favor of `check_all_pending!`, which loops through all configured databases. It still works in 7.1 but emits a deprecation warning, and is removed entirely in Rails 7.2. Commonly found in `test_helper.rb` or `rails_helper.rb`, but also set up by healthcheck gems (e.g. [`rails-healthcheck`](https://github.com/linqueta/rails-healthcheck)) to run on every `/healthcheck` request.
+
+**Detection Pattern:**
+```ruby
+# test/test_helper.rb, spec/rails_helper.rb, or config/initializers/*.rb (e.g. healthcheck gems)
+ActiveRecord::Migration.check_pending!
+```
+
+**Fix:**
+```ruby
+# BEFORE
+ActiveRecord::Migration.check_pending!
+
+# AFTER
+ActiveRecord::Migration.check_all_pending!
+```
+
 ---
 
 ## New Features
@@ -337,7 +357,7 @@ if ENV["DEPENDENCIES_NEXT"] == "1"
 end
 ```
 
-Then run `bundle install && bundle bootboot` once.
+Then run `bundle install`, `cp Gemfile.lock Gemfile_next.lock`, and `DEPENDENCIES_NEXT=1 bundle install` once. Do not run `bundle bootboot` after hand-writing the block above; it appends a second copy (see `rails-upgrade/SKILL.md`).
 
 ### Phase 2: Gemfile Updates
 ```ruby

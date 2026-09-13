@@ -94,4 +94,4 @@ If the smoke test passes on the first run, record that explicitly — it is a po
 ## Notes
 
 - The smoke test does not replace the post-bump test suite run in Step 6. It is a *boot* check, not a feature check. Step 6 still runs the full suite against both versions.
-- Skip this step only if `Gemfile_next.lock` does not yet exist (very early in dual-boot setup — `bundle bootboot` hasn't run). In all other cases, run it.
+- Skip this step only if `Gemfile_next.lock` does not yet exist (very early in dual-boot setup — the lockfile seeding step in Step 2 hasn't run). In all other cases, run it.
