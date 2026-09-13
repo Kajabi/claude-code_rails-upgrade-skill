@@ -72,7 +72,15 @@ This skill assumes [bootboot](https://github.com/Shopify/bootboot), a Bundler pl
    end
    ```
 
-3. Run `bundle install && bundle bootboot` once. After that, every plain `bundle install` updates both lockfiles. Commit `Gemfile`, `Gemfile.lock`, and `Gemfile_next.lock`.
+3. Install the plugin and seed the second lockfile. **Do not run `bundle bootboot`** after hand-writing the block in step 1: that command appends its own copy of the loader / `enable_dual_booting` block to the Gemfile unconditionally, so you would end up with two.
+
+   ```sh
+   bundle install                       # installs the plugin, resolves Gemfile.lock
+   cp Gemfile.lock Gemfile_next.lock    # seed; bootboot only syncs a lockfile that already exists
+   DEPENDENCIES_NEXT=1 bundle install   # re-resolves Gemfile_next.lock against the next-side pins and installs those gems
+   ```
+
+   From here on every plain `bundle install` / `bundle update` keeps both lockfiles in sync, but only installs the current side's gems. Re-run `DEPENDENCIES_NEXT=1 bundle install` whenever the next-side pins change. Commit `Gemfile`, `Gemfile.lock`, and `Gemfile_next.lock`.
 
 ### Run the app on either side
 
@@ -102,6 +110,7 @@ If the project wraps the check in a helper (e.g. `AppConfig.dependencies_next?`)
 
 ### Caveats
 
+- **Always set `DEPENDENCIES_NEXT=1` exactly.** Bootboot picks the lockfile on truthiness (`if ENV['DEPENDENCIES_NEXT']`), while the Gemfile block above compares to `"1"`. Any other value (`true`, `yes`) makes bootboot select `Gemfile_next.lock` while the Gemfile resolves the *current* pins into it. CI env blocks should use the string `"1"`; the code-level guard below stays a plain truthiness check because bootboot itself exports `1` while syncing.
 - `bootboot` resolves and locks dependencies for both sets, but it does not switch your local Ruby. If the next set bumps Ruby, install the new Ruby separately (via `asdf` / `rbenv`) and switch before running `DEPENDENCIES_NEXT=1` commands.
 - `bootboot` does **not** ship a `bundle_report compatibility` equivalent. Step 4.5 (Gem Compatibility) uses railsbump.org as the primary check. `bundle_report compatibility` from `next_rails` is available as an offline alternative if the user already has it installed as a CLI; see `workflows/gem-compatibility-workflow.md`.
 
@@ -321,7 +330,9 @@ Then:
   to Gemfile (snippet in the section above).
 - Express the upgrade as an `if ENV["DEPENDENCIES_NEXT"] == "1"` block
   pinning the target Rails version.
-- Run `bundle install && bundle bootboot` once.
+- Run `bundle install`, then `cp Gemfile.lock Gemfile_next.lock`, then
+  `DEPENDENCIES_NEXT=1 bundle install`. Do NOT run `bundle bootboot` — it
+  appends a second copy of the block you just wrote.
 - Confirm both Gemfile.lock and Gemfile_next.lock now exist and pin the
   expected Rails versions.
 - Smoke-check the next side with `DEPENDENCIES_NEXT=1 bin/rails runner "puts Rails.version"`.
@@ -514,7 +525,7 @@ Before starting ANY upgrade:
 
 **Action - Step 2 (Set Up Dual-Boot):**
 1. Follow the "CRITICAL: Dual-Boot Setup with bootboot" section above for inline setup
-2. Wire bootboot into the Gemfile, run `bundle install && bundle bootboot`, and extend CI to run the next-dependency-set side (`DEPENDENCIES_NEXT=1`)
+2. Wire bootboot into the Gemfile, run `bundle install`, seed `Gemfile_next.lock` (`cp Gemfile.lock Gemfile_next.lock && DEPENDENCIES_NEXT=1 bundle install`), and extend CI to run the next-dependency-set side (`DEPENDENCIES_NEXT=1`)
 
 **Action - Step 3 (Validate Upgrade Path):**
 1. Validate upgrade path (single-hop vs multi-hop)

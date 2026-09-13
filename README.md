@@ -61,7 +61,7 @@ git clone https://github.com/ombulabs/claude-code_rails-load-defaults-skill.git
 cp -r claude-code_rails-load-defaults-skill/rails-load-defaults ~/.claude/skills/
 ```
 
-The `bootboot` Bundler plugin gets installed inside your Rails app during Step 2 of the upgrade workflow (`plugin "bootboot"` in the `Gemfile`, then `bundle install && bundle bootboot`). It is not a Claude Code skill and does not need to be installed at the `~/.claude` level.
+The `bootboot` Bundler plugin gets installed inside your Rails app during Step 2 of the upgrade workflow (`plugin "bootboot"` plus the `enable_dual_booting` block in the `Gemfile`, then `bundle install`, `cp Gemfile.lock Gemfile_next.lock`, and `DEPENDENCIES_NEXT=1 bundle install`). It is not a Claude Code skill and does not need to be installed at the `~/.claude` level.
 
 ### Basic Usage
 
