@@ -26,40 +26,75 @@ We've encountered (and solved) edge cases that don't appear in any documentation
 
 ### Installation
 
-This skill has one companion skill, [rails-load-defaults](https://github.com/ombulabs/claude-code_rails-load-defaults-skill), and one sibling plugin in this repo, `upgrade-cleanup`, that runs the post-upgrade scaffolding teardown. Dual-boot is handled inline using the [bootboot](https://github.com/Shopify/bootboot) Bundler plugin — no separate skill required.
+> **This is the bootboot fork.** The plugins published on the `ombulabs-ai`
+> marketplace are the upstream versions, which use `next_rails` for dual-boot.
+> Installing `rails-upgrade` or `upgrade-cleanup` from that marketplace will
+> **not** give you the bootboot workflow this README describes. Install those
+> two from this repository using one of the methods below.
 
-**From inside the Claude Code CLI prompt (recommended):**
+This repo ships two skills — `rails-upgrade` and its sibling `upgrade-cleanup`,
+which runs the post-upgrade scaffolding teardown. There is one external
+companion skill, [rails-load-defaults](https://github.com/ombulabs/claude-code_rails-load-defaults-skill),
+which is **not** forked and installs normally from the upstream marketplace.
+
+Dual-boot is handled inline using the [bootboot](https://github.com/Shopify/bootboot)
+Bundler plugin — no separate skill required.
+
+**Symlink install (recommended):**
+
+Best if you expect to edit the skills or track this fork. Edits in the clone
+take effect immediately, with no re-install step.
+
+```bash
+git clone https://github.com/Kajabi/claude-code_rails-upgrade-skill.git
+cd claude-code_rails-upgrade-skill
+
+mkdir -p ~/.claude/skills
+ln -s "$PWD/rails-upgrade" ~/.claude/skills/rails-upgrade
+ln -s "$PWD/upgrade-cleanup/upgrade-cleanup" ~/.claude/skills/upgrade-cleanup
+```
+
+**Copy install:**
+
+Best if you just want to use the skills and do not intend to change them. You
+will need to re-copy to pick up updates.
+
+```bash
+git clone https://github.com/Kajabi/claude-code_rails-upgrade-skill.git
+mkdir -p ~/.claude/skills
+cp -r claude-code_rails-upgrade-skill/rails-upgrade ~/.claude/skills/
+cp -r claude-code_rails-upgrade-skill/upgrade-cleanup/upgrade-cleanup ~/.claude/skills/
+```
+
+Note the nested path on the second command. `upgrade-cleanup/` is a plugin
+wrapper directory; the skill itself — the directory holding `SKILL.md` — is
+`upgrade-cleanup/upgrade-cleanup/`. Copying the wrapper puts `SKILL.md` one
+level too deep and Claude Code will not discover it.
+
+**The companion skill (unforked, upstream):**
+
+From inside the Claude Code CLI prompt:
 
 ```
 /plugin marketplace add ombulabs/claude-skills
-/plugin install rails-upgrade@ombulabs-ai
 /plugin install rails-load-defaults@ombulabs-ai
-/plugin install upgrade-cleanup@ombulabs-ai
 ```
 
-**From your terminal:**
+Or from your terminal:
 
 ```bash
 claude plugin marketplace add https://github.com/ombulabs/claude-skills.git
-claude plugin install rails-upgrade@ombulabs-ai
 claude plugin install rails-load-defaults@ombulabs-ai
-claude plugin install upgrade-cleanup@ombulabs-ai
 ```
 
-**Manual install:**
+**Verifying the install:**
 
 ```bash
-# 1. This skill
-git clone https://github.com/ombulabs/claude-code_rails-upgrade-skill.git
-cp -r claude-code_rails-upgrade-skill/rails-upgrade ~/.claude/skills/
-
-# 2. upgrade-cleanup (sibling plugin, same repo)
-cp -r claude-code_rails-upgrade-skill/upgrade-cleanup ~/.claude/skills/
-
-# 3. rails-load-defaults (dependency)
-git clone https://github.com/ombulabs/claude-code_rails-load-defaults-skill.git
-cp -r claude-code_rails-load-defaults-skill/rails-load-defaults ~/.claude/skills/
+ls ~/.claude/skills/rails-upgrade/SKILL.md ~/.claude/skills/upgrade-cleanup/SKILL.md
 ```
+
+Both paths must exist. In a new Claude Code session, `/rails-upgrade` should
+then be available.
 
 The `bootboot` Bundler plugin gets installed inside your Rails app during Step 2 of the upgrade workflow (`plugin "bootboot"` plus the `enable_dual_booting` block in the `Gemfile`, then `bundle install`, `cp Gemfile.lock Gemfile_next.lock`, and `DEPENDENCIES_NEXT=1 bundle install`). It is not a Claude Code skill and does not need to be installed at the `~/.claude` level.
 
