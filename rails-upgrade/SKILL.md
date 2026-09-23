@@ -300,6 +300,22 @@ When user requests an upgrade, follow this workflow:
    - Run the safe read-only smoke baseline: Rails boot, test-env boot when possible, routes load, migration status, and asset/build command if present
    - Record baseline confidence as partial
    - Continue only if boot/routes checks pass and the user accepts the risk of proceeding without real tests
+5b. If a suite exists but is too large to run locally (large monolith):
+   - Some repos explicitly forbid a full local suite run (hours of runtime, or
+     the suite only resolves against CI-provisioned services). The repo's own
+     contribution guide is authoritative — if it says "do not run the full
+     suite locally", honor that instead of this step's default.
+   - Substitute a CI-derived baseline: read the status of the most recent
+     completed run of the REQUIRED workflow on the base branch (CircleCI,
+     GitHub Actions, etc.). A green run on the base branch is the baseline.
+   - Record which pipeline/run supplied the baseline (provider, number, SHA,
+     timestamp) so the post-upgrade comparison is against a known point.
+   - Locally, run only the targeted specs implicated by the hop's detection
+     findings (Step 4), not the whole suite.
+   - Record baseline confidence as ci-verified. This is stronger than the
+     no-test-suite smoke path and weaker than a local full-suite run.
+   - If the base branch is RED, treat it exactly like failing tests below:
+     STOP, and fix or wait for green before starting the hop.
 6. If ANY tests fail:
    - STOP the upgrade process
    - Report failing tests to user
@@ -452,6 +468,40 @@ Triaging tomorrow's deprecation warnings now expands the scope of the current ho
 3. Tests are re-run between each change
 4. Consolidates into config/application.rb when done
 ```
+
+**Accumulated defaults debt (load_defaults lags the installed Rails by more than one version)**
+
+An app can sit on Rails X while `config.load_defaults` still reads X-2 or X-3,
+because each prior hop shipped the gem bump without finishing the defaults
+alignment. Check for this at Step 0, not at Step 7 — it changes how much
+pre-work the hop carries:
+
+1. Read `config.load_defaults` from `config/application.rb`.
+2. List `config/initializers/new_framework_defaults_*.rb`. One file per
+   un-flipped version; each is its own backlog. A file's presence means that
+   version's defaults are NOT yet active.
+3. Per file, count active vs commented flags — do not trust a ticket's counts,
+   which go stale as flags land one at a time. The file on the base branch is
+   the only source of truth.
+4. Report the total as `<n> files / <m> flags` of accumulated debt.
+
+**Sequencing:** the flags are independently shippable and revertable, and none
+of them depend on the gem version, so accumulated debt does NOT block the next
+version bump. But do not carry a *partially* applied defaults file across a
+hop — finish any file that is already part-flipped before bumping, so the app
+isn't running a half-applied defaults set while its framework version moves.
+Files that are untouched (zero flags flipped) can trail the bump safely.
+
+**Flags that need more than "flip and run specs"** — pull these out of the
+bulk backlog and give each its own change, because a green suite does not
+prove them safe:
+- `cookies_serializer` — needs the two-phase `:hybrid` migration in production
+  or live sessions are invalidated on deploy.
+- `key_generator_hash_digest_class` / `hash_digest_class` — changes derived
+  keys, so signed cookies and cache entries invalidate at deploy time.
+- `raise_on_open_redirects` — converts latent redirect bugs into 500s.
+- `active_record.partial_inserts` — changes the INSERT shape for every model.
+- `active_storage.variant_processor` — swaps the image-processing backend.
 
 ### Step 8: Mention Cleanup (USER-TRIGGERED)
 ```
