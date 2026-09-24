@@ -19,10 +19,24 @@ upgrade_findings:
       pattern: "^\\s*enum\\s+\\w+:\\s*"
       exclude: ""
       search_paths:
-        - "app/models/"
-      explanation: "Rails 8.0 removes the keyword-arguments form of enum (`enum status: { ... }, _prefix: true`). The 7.0 / 7.1 hash form (`enum :status, { ... }, prefix: true`) is now the only supported syntax. activerecord/CHANGELOG.md: 'Remove deprecated support for defining `enum` with keyword arguments.' Models still using the old form raise ArgumentError on class load — the app fails to boot"
+        - "app/"
+        - "lib/"
+        - "engines/"
+      explanation: "Rails 8.0 removes the keyword-arguments form of enum (`enum status: { ... }, _prefix: true`). The 7.0 / 7.1 hash form (`enum :status, { ... }, prefix: true`) is now the only supported syntax. activerecord/CHANGELOG.md: 'Remove deprecated support for defining `enum` with keyword arguments.' Models still using the old form raise ArgumentError on class load — the app fails to boot. THIS PATTERN ONLY SEES THE SINGLE-LINE FORM. The multi-line `enum(` form is covered by the companion pattern ENUM_KWARGS_MULTILINE, and even the pair cannot prove absence — see its explanation for the authoritative check"
       fix: "Convert to the explicit form: `enum :status, { active: 0, archived: 1 }, prefix: true`. Mechanical migration; no runtime behavior change once converted"
       variable_name: "ENUM_KWARGS"
+
+    - name: "enum with keyword-arguments form (multi-line call)"
+      kind: "breaking"
+      pattern: "^\\s*enum\\s*\\(\\s*(\\w+:|$)"
+      exclude: ""
+      search_paths:
+        - "app/"
+        - "lib/"
+        - "engines/"
+      explanation: "Companion to ENUM_KWARGS for the parenthesized form that spans lines — `enum(` on its own line followed by `status: { ... },` and options on later lines. A line regex cannot see across lines, so ENUM_KWARGS misses every one of these. Measured on a large app: ENUM_KWARGS alone found 36 sites; the real total was 183 (a 5x undercount), most of them multi-line. This pattern flags the opening line for review. It can false-positive on a multi-line POSITIONAL call (`enum(` then `:status, ...`), so read each hit. NEITHER pattern can prove absence. Authoritative checks, strongest first: (1) runtime — eager-load the app with the enum deprecation removed from any allow-list, or count distinct call sites emitting 'Defining enums with keyword arguments is deprecated' during eager load; note this misses files that are not eager-loaded (lib/, engine models loaded separately). (2) an AST scan (e.g. Prism) for `enum` calls with no positional arguments and a keyword-hash first argument — covers every file regardless of load path. Use both when the count matters"
+      fix: "Change the first keyword key to a positional symbol and drop the underscore from options: `enum(status: {...}, _prefix: true)` becomes `enum(:status, {...}, prefix: true)`. Prefer an AST-based rewrite over regex for multi-line calls, and preserve computed values (e.g. `EVENTS.zip(EVENTS).to_h`) byte-for-byte"
+      variable_name: "ENUM_KWARGS_MULTILINE"
 
     - name: "assume_ssl configuration"
       kind: "optional"
