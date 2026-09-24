@@ -226,6 +226,20 @@ Run the search, then filter results in analysis.
 **Search multiple paths:**
 Make separate Grep calls for each path, or use a parent directory.
 
+### ⚠️ Regex dialect — a wrong engine reports false zeros
+
+The `pattern:` values in `rails-*-patterns.yml` use Perl-style escapes (`\s`, `\b`, `\w`, `\d`) — about 150 lines across the pattern files. The Grep tool is ripgrep-based and supports them. **Most other greps do not, and they fail silently**: the pattern still runs, simply matching nothing, so a real finding comes back as a clean zero.
+
+Common ways this happens:
+
+- `git grep -E` and `grep -E` use POSIX ERE, where `\s` and `\b` are not recognised. Use `git grep -P` (PCRE) instead — never `-E`.
+- Reading a branch you haven't checked out (e.g. `git grep <pattern> origin/main -- <paths>`) tempts a switch away from the Grep tool. That is fine, as long as you add `-P`.
+- BSD `grep` on macOS has no `-P` at all. Use the Grep tool or `rg`.
+
+Measured on a real app, the Rails 8.0 `enum`-keyword-arguments pattern — a hard boot failure at 8.0 — returned **0** hits under `git grep -E` and **34** under `git grep -P`. The dialect mistake would have declared the upgrade's biggest breaking change clean.
+
+**Before trusting any zero, prove the engine works.** Run one pattern you *know* matches (e.g. `^\s*class\s+\w+` over `app/models`). If that returns nothing, your engine is ignoring the escapes, and every zero in the run is suspect. Record in the report which engine and flags produced the results.
+
 ### Using Glob to Find Files
 
 **Find all Ruby files in config:**
