@@ -1,6 +1,30 @@
 # Changelog
 
 ## Unreleased
+- Added a "Resolver dry-run and pre-load pass" to the gem compatibility workflow (Step 4.5). Railsbump and `bundle_report` check each gemspec against the target Rails but never show the resolved bundle, so they miss path gems and private-registry gems, and they can't say which transitive gems move. The new pass:
+  - resolves the whole bundle against the target in a scratch worktree (lock-only)
+  - classifies every moved gem as must-move-with-bump, pre-loadable (ship ahead at the latest version) or incidental (pin in the bump PR)
+  - checks each chosen version against the latest release and against repo release gates (supply-chain cooldown, license scan)
+  - covers default gems pinned below Ruby's bundled version, which can quietly keep APIs Ruby already removed
+
+  Found on kajabi-products' 7.2 → 8.0 hop:
+  - Resolving surfaced blockers railsbump reports as `skipped`: an in-repo engine gemspec and a private gem.
+  - Pre-loading moved 16 transitive gems out of the eventual bump PR.
+  - The resolver's picks included `rdoc` 8, which Rails 8.0 doesn't need and which failed both the 7-day cooldown and the license scan (`GPL-2.0-only`).
+- Added `references/proving-mechanical-refactors.md`, linked from Step 6. For mechanical fix-before-bump refactors, specs don't prove behavior is unchanged. The reference covers:
+  - a before/after dump of everything Rails generates from a declaration, including a write/read/SQL round trip for every value
+  - a mutation test proving the dump can fail
+  - a local end-to-end pass with the "stop allowing the old form" gate enabled
+  - a post-release stored-value query in production, focused on declarations whose key differs from the stored value
+
+  Used on kajabi-products' 183-site enum migration: 191 enums and 769 values dumped identical across 9 PRs, then stored values checked in prod after each release.
+- Step 6 "Deploy and verify" now requires confirming each fix-before-bump release reaches 100% of production and comparing errors before and after. Risky slices ship alone. It points to a rollout-monitoring skill when the repo has one.
+- Rails 8.0 detection: added `URI_ESCAPE_REMOVED` and `URI_DEFAULT_PARSER_REGEXP`. activesupport 8.0 adds `uri >= 0.13.1`, and apps pinning `uri ~> 0.10` lose `URI.escape` / `unescape` / `encode` / `decode` and the RFC 2396 regexps on the default parser. `URI_ESCAPE_REMOVED` searches `spec/` and `test/` as well: on kajabi-products, two spec files called these methods and only CI caught them. Added "Gem Resolution Notes" to the 7.2 → 8.0 guide:
+  - the `uri` fallout seen in gems (`dartsass-ruby`, `paypalhttp`)
+  - `rails-i18n` moving with the bump
+  - pinning incidental majors (`minitest` 6, `rdoc` 8)
+  - why Rack stays on 2.2
+  - the gems that can be pre-loaded on 7.2
 - Corrected the runtime check recommended for the Rails 8.0 enum migration. The previous wording suggested counting the enum deprecation during eager load, which misses every class loaded during boot: a subscriber installed from `rails runner` or an initializer starts too late. On kajabi-products it recorded 0 hits even with `user.rb` reverted to the keyword form, because User loads during boot. The guidance now requires the hook to be installed before Rails boots (e.g. a TracePoint on `ActiveRecord::Enum#enum` loaded via RUBYOPT) and to require non-eager-loaded files explicitly.
 - Fixed a 5x undercount in the Rails 8.0 enum detection (`rails-80-patterns.yml`). `ENUM_KWARGS` matched only the single-line keyword form (`enum status: {...}`), so it missed every parenthesized multi-line call (`enum(` on its own line, keyword hash and options below) — and its `search_paths` covered only `app/models/`, missing engine and `lib/` models. On kajabi-products it found 36 sites; the real total was 183 across 124 files. Added a companion `ENUM_KWARGS_MULTILINE` pattern and widened both to `app/`, `lib/`, `engines/`, taking the count to 190 (the extras are multi-line positional calls, flagged for review — over-reporting beats missing a boot failure). The explanation states plainly that line regexes cannot prove absence, and names the authoritative checks: a runtime count of the deprecation during eager load, and an AST scan, each covering what the other misses.
 - Documented the regex dialect the detection patterns require (`workflows/direct-detection-workflow.md`). About 150 pattern lines use Perl-style escapes (`\s`, `\b`, `\w`, `\d`) that ripgrep (and so the Grep tool) supports but POSIX ERE silently ignores — `git grep -E`, `grep -E` and BSD `grep` all run such a pattern without error and match nothing, reporting a false zero. Found running the skill against kajabi-products: the Rails 8.0 enum-keyword-arguments pattern, a hard boot failure at 8.0, returned 0 hits under `git grep -E` and 34 under `git grep -P`. The workflow now names the safe engines (Grep tool, `rg`, `git grep -P`), explains the branch-reading case that tempts a switch away from the Grep tool, and requires a known-positive sanity check before trusting any zero.

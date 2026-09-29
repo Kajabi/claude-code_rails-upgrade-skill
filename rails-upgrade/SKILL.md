@@ -252,6 +252,7 @@ If user requests a multi-hop upgrade (e.g., 5.2 → 8.1):
 - `references/multi-hop-strategy.md` - Multi-version planning
 - `references/testing-checklist.md` - Comprehensive testing
 - `references/gem-compatibility.md` - Gem update order and the "no compatible version" playbook (fork / vendor / replace). Load only when Step 4.5's compatibility check produced blockers.
+- `references/proving-mechanical-refactors.md` - Before/after artifact dump, mutation test and post-release stored-value check for mechanical refactors (e.g. declaration-syntax removals). Load in Step 6 when a fix spans many call sites.
 - `references/js-compressor-sprockets-mismatch.md` - Keeping terser / closure-compiler working when the target Rails pins Sprockets to the 2.x line. Load only when JS_COMPRESSOR_GEM_MISMATCH fires.
 
 ### Detection Pattern Resources
@@ -390,6 +391,13 @@ Determines which gems must be bumped before the Rails version change can resolve
 3. If any blockers exist, load references/gem-compatibility.md for
    the fork/replace/vendor playbook and the gem update order. Skip
    otherwise.
+4. Run the "Resolver dry-run and pre-load pass" in the same workflow:
+   resolve the whole bundle against the target Rails in a scratch
+   worktree, then classify every gem that moves as must-move-with-bump,
+   pre-loadable (ship ahead at the latest version, in small PRs) or
+   incidental (pin in the bump PR). This is the only check that sees
+   path gems and private-registry gems, and it shrinks the eventual
+   bump PR to Rails itself. Re-run it as fix-before-bump work lands.
 ```
 
 ### Step 4.6: Boot Smoke Test on the Next Dependency Set
@@ -450,8 +458,10 @@ instead of mid-implementation.
 4. Update the Gemfile's next-side conditional to the target Rails version (and any required gem bumps), then run `bundle install` so both Gemfile.lock and Gemfile_next.lock update
 5. Run test suite against both versions (`bundle exec rspec` and `DEPENDENCIES_NEXT=1 bundle exec rspec`)
 6. **Check CI config matches the upgraded Gemfile** — load `workflows/ci-sync-workflow.md`, fix any mismatches before proceeding
-7. Deploy and verify
+7. Deploy and verify. For each fix-before-bump release, confirm it reaches 100% of production (sample the deployed version, not just the first response), then compare new errors and error rate before and after. If the repo has a rollout-monitoring skill (e.g. `monitor-rollout`), use it. Release risky slices (money paths, unusual load paths) on their own so a regression is attributable.
 ```
+
+For mechanical fix-before-bump refactors that span many call sites (declaration-syntax removals, method renames), specs alone don't prove behavior is unchanged. Load `references/proving-mechanical-refactors.md` for the before/after artifact dump, the mutation test that proves the dump can fail, and the post-release stored-value check.
 
 **Do not fix `load_defaults`-triggered runtime deprecation warnings about *future* Rails versions during this hop.** This caveat covers post-bump runtime warnings emitted by Rails X+1 about behavior scheduled to change in X+2 — typically surfaced once `load_defaults X.Y` flips on in Step 7. Those belong to the *next* upgrade cycle and are addressed before the next version bump.
 
