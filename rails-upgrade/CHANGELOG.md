@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Added Step 3b to the detection workflow: grep for the app's own version gates (`Rails::VERSION` checks, `rails_7_2?`-style helpers). A strict-equality gate on the current version flips on the target; if its other branch calls `Rails.deprecator.warn` and the app raises on un-allow-listed deprecations, dev/test boot fails. Found on kajabi-products' counter-cache override (`unless AppConfig.rails_7_2?`).
+- Added "Gems your organization owns" to `references/gem-compatibility.md`: widening an owned gem's Rails ceiling isn't proof it works. Add a CI matrix of consumer Rails versions (`gemfiles/*` + `BUNDLE_GEMFILE`), seed matrix lockfiles from the main lockfile, and check which transitive majors the re-resolve pulled in. Found on `kj_notify`, whose CI ran only Rails 7.0 and hid a `connection_pool` 3.x `ArgumentError`.
 - Added a "Resolver dry-run and pre-load pass" to the gem compatibility workflow (Step 4.5). Railsbump and `bundle_report` check each gemspec against the target Rails but never show the resolved bundle, so they miss path gems and private-registry gems, and they can't say which transitive gems move. The new pass:
   - resolves the whole bundle against the target in a scratch worktree (lock-only)
   - classifies every moved gem as must-move-with-bump, pre-loadable (ship ahead at the latest version) or incidental (pin in the bump PR)

@@ -124,6 +124,19 @@ Grep:
 
 Same process for `upgrade_findings.medium_priority` and `upgrade_findings.low_priority` patterns.
 
+### Step 3b: App-level version gates (not in any pattern file)
+
+Pattern files only know Rails' own APIs. Apps often wrap monkey-patches and backports in their own version checks: `Rails.version.start_with?("7.2")`, `Rails::VERSION::MINOR == 2`, or helpers such as `AppConfig.rails_7_2?`. Grep for these and read every hit:
+
+```
+grep -rnE 'Rails::VERSION::(MAJOR|MINOR|STRING)|Rails\.(version|gem_version)|rails_[0-9]+_[0-9]+\?' app lib config --include='*.rb'
+```
+
+Classify each gate:
+
+- **Strict-equality gates on the current version** (`== 7.2`, `unless rails_7_2?`) flip to the "other" branch on the target. If that branch warns or raises, it becomes a fix-before-bump finding. Check this especially when the app raises on un-allow-listed deprecations in dev/test: a `Rails.deprecator.warn("only tested with 7.2")` turns into a boot failure there. Widen the gate once you've checked the code it guards against the target.
+- **Gates for versions the app no longer runs** (a `rails_7_1?` helper on a 7.2 app) are dead code. Remove them in the same pre-work so the bump PR's diff stays about the bump.
+
 ---
 
 ### Step 4: Compile Findings (group by `kind`, sub-order by `priority`)

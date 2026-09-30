@@ -43,3 +43,17 @@ A common false-blocker pattern: gems that became unnecessary in a specific Rails
 - **Extracted as a back-compat shim**: `protected_attributes` is the *opposite* shape — it was extracted from Rails 4.0 specifically as a transitional shim for the old mass-assignment API and was never re-merged. It still exists as a separate gem, but if your code is moving to `strong_parameters` you can remove it once the controllers are converted.
 
 If `bundle_report` flags one of these, check the target version guide before assuming you need a fork.
+
+---
+
+## Gems your organization owns
+
+A private or in-house gem that caps Rails (`rails < 8.0`) is a blocker only you can clear. Widening the gemspec ceiling unblocks the resolver, but it doesn't show that the gem works on the target. Check the gem's own CI before relying on the widened release:
+
+- **Which Rails does its CI actually run?** A gem's CI often tests only the Rails pinned in its development `Gemfile.lock`, which can be several minors behind every consumer. A green run then says nothing about the versions that matter.
+- **Add a matrix of consumer versions.** Keep the gem's own `Gemfile` as is (it may also build a service image). Read the Rails requirement from an env var with the old pin as the default, add one `gemfiles/rails_X_Y.gemfile` per version that sets the var and calls `eval_gemfile File.expand_path("../Gemfile", __dir__)`, and select them in CI with `BUNDLE_GEMFILE`. In GitHub Actions, make the Rails version a real matrix axis and use `include` only to attach each gemfile. When a key is defined only in `include`, later entries overwrite earlier ones and the matrix collapses to one job.
+- **Seed each matrix lockfile from the main one** (`cp Gemfile.lock gemfiles/rails_X_Y.gemfile.lock`, then `bundle lock --update rails <test gems>`). A fresh resolve can fail on `git:` dependencies whose branch no longer exists upstream; the locked revision still resolves.
+- **Expect the test tooling to move.** Old `rspec-rails` / `database_cleaner-active_record` / `shoulda-matchers` versions often don't load on newer Rails, so the matrix lockfiles carry newer ones.
+- **Read what the re-resolve pulled in.** Unpinned transitive gems can jump a major (e.g. `connection_pool` 2.x → 3.x, which accepts only keyword arguments) and expose latent bugs that consumers pinning the older major don't hit yet. Fix those in the gem before a consumer lifts the pin.
+
+Found on kajabi-products' 7.2 → 8.0 hop: `kj_notify` CI ran only Rails 7.0.8.7 while the host ran 7.2. Its 7.2 matrix lockfile resolved `connection_pool` 3.0.2 and 14 specs failed on a positional-hash `ConnectionPool.new` call.
