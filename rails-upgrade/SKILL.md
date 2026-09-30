@@ -508,10 +508,37 @@ prove them safe:
 - `cookies_serializer` — needs the two-phase `:hybrid` migration in production
   or live sessions are invalidated on deploy.
 - `key_generator_hash_digest_class` / `hash_digest_class` — changes derived
-  keys, so signed cookies and cache entries invalidate at deploy time.
+  keys, so signed cookies and cache entries invalidate at deploy time. Before
+  planning the rotation, grep for bare `ActiveSupport::KeyGenerator.new(secret)`
+  (no `hash_digest_class:`) used to encrypt data at rest. Those follow the
+  global class default too, and rotation doesn't cover stored ciphertext. Pin
+  the current digest explicitly at those call sites first, and prove it with a
+  spec that encrypts, switches the global, then decrypts.
 - `raise_on_open_redirects` — converts latent redirect bugs into 500s.
 - `active_record.partial_inserts` — changes the INSERT shape for every model.
 - `active_storage.variant_processor` — swaps the image-processing backend.
+
+**Before counting or flipping, check what each flag actually does in this app:**
+- Diff the commented flags against the `load_defaults` source of the Rails
+  version you're on (`railties-X/lib/rails/application/configuration.rb`).
+  Flags a later version removed (e.g. `disable_to_s_conversion`,
+  `use_rfc4122_namespaced_uuids` by 7.2) are no-ops. So are flags already set
+  elsewhere (`config/application.rb`, a dedicated initializer), and framework
+  sections that aren't loaded (`load_defaults` guards each one with
+  `respond_to?(:active_storage)` etc.).
+- Verify a flipped flag's **effective** value, not the config value: e.g.
+  `bin/rails runner 'p ActiveRecord::Base.automatic_scope_inversing'`.
+  `ActiveRecord::Base`-level settings (`automatic_scope_inversing`,
+  `partial_inserts`, …) are copied from config only in the `on_load(:active_record)`
+  hook. If any earlier initializer loads `ActiveRecord::Base` (a top-level
+  `ActiveRecord::Base.include(...)`, or a gem ORM such as doorkeeper), a flag set
+  in `new_framework_defaults_*.rb` is silently ignored. The flag then
+  switches on at the `load_defaults` bump instead, as an unplanned behavior
+  change. Set Base-level flags in `config/application.rb`. Module-level
+  settings (`ActiveRecord.x=`) are re-applied after initialize and are
+  unaffected.
+- For association flags, dump every reflection's `inverse_of` with the flag
+  off and on and diff the two lists. That is the exact blast radius.
 
 ### Step 8: Mention Cleanup (USER-TRIGGERED)
 ```
