@@ -1,6 +1,17 @@
 # Changelog
 
 ## Unreleased
+- Boot smoke test (Step 4.6): added "Large apps: find every failure in one pass". It covers:
+  - `DEPENDENCIES_NEXT=1 bundle lock` writes to `Gemfile.lock` under bootboot 0.2.2; use `--lockfile=Gemfile_next.lock`.
+  - Getting past a known resolve blocker with a next-side-only pin, to find the rest.
+  - Loading every Zeitwerk constant and collecting failures (with a current-side baseline) instead of stopping at the first `eager_load!` error.
+  - App-level boot failures: version tripwires, deprecation subscribers raising on next-version deprecations, and Rails 8.0's `only:/except:` validation, with a collect-don't-raise route scan and a before/after route-dump proof.
+  - Booting dev, test and production on both sides.
+  - CI exporting `DEPENDENCIES_NEXT=0`, which is truthy.
+  - Splitting the fixes that work on both versions into a pre-work PR.
+
+  Found on kajabi-products' 7.2 → 8.0 smoke run: the whole bundle resolved with only the Rails gems, `rails-i18n` and `active_interaction` moving. 8 of 12,364 files failed to load, all `active_interaction` 5.
+- Rails 8.0 detection: added `ROUTES_INVALID_ONLY_EXCEPT` (breaking). 8.0 raises at route load when `resource(s)` `only:/except:` lists a non-RESTful action, which 7.2 ignored.
 - Added Step 3b to the detection workflow: grep for the app's own version gates (`Rails::VERSION` checks, `rails_7_2?`-style helpers). A strict-equality gate on the current version flips on the target; if its other branch calls `Rails.deprecator.warn` and the app raises on un-allow-listed deprecations, dev/test boot fails. Found on kajabi-products' counter-cache override (`unless AppConfig.rails_7_2?`).
 - Added "Gems your organization owns" to `references/gem-compatibility.md`: widening an owned gem's Rails ceiling isn't proof it works. Add a CI matrix of consumer Rails versions (`gemfiles/*` + `BUNDLE_GEMFILE`), seed matrix lockfiles from the main lockfile, and check which transitive majors the re-resolve pulled in. Found on `kj_notify`, whose CI ran only Rails 7.0 and hid a `connection_pool` 3.x `ArgumentError`.
 - Added a "Resolver dry-run and pre-load pass" to the gem compatibility workflow (Step 4.5). Railsbump and `bundle_report` check each gemspec against the target Rails but never show the resolved bundle, so they miss path gems and private-registry gems, and they can't say which transitive gems move. The new pass:

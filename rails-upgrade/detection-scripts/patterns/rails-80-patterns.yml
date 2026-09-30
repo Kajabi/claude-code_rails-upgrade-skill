@@ -96,6 +96,17 @@ upgrade_findings:
       fix: "Pass the composite key as an Array to `foreign_key:` instead: `belongs_to :activity, foreign_key: [:activity_id, :school_id]`. AR maps an Array `foreign_key` to query_constraints internally on both 7.2 and 8.0, so the change is behavior-preserving and needs no dual-boot branch."
       variable_name: "QUERY_CONSTRAINTS_OPTION"
 
+    - name: "resources only:/except: listing a non-RESTful action"
+      kind: "breaking"
+      pattern: "(only|except):\\s*\\[?[^]]*:[a-z_]+"
+      exclude: ""
+      search_paths:
+        - "config/routes.rb"
+        - "config/routes/"
+      explanation: "Rails 8.0 validates `resource`/`resources` `only:` and `except:`. Any action outside the seven RESTful ones (index, create, new, show, update, destroy, edit) raises `ArgumentError: Route `resources :x` - :only and :except must include only [...]` when routes load, so the app fails to boot. Rails 7.2 silently ignored the extra names. They usually sit next to a `member`/`collection` block that already routes the action, so they did nothing. THIS PATTERN IS DELIBERATELY BROAD (every only:/except: matches). Check each match by eye, or use the authoritative check: boot under DEPENDENCIES_NEXT=1 with the collect-don't-raise route scan in workflows/boot-smoke-test-workflow.md ('Expect app-level failures'). The Rails error only names the first offender. Seen at kajabi-products: 4 declarations across 3 route files."
+      fix: "Remove the non-RESTful names from `only:`/`except:`, and keep or add the `member`/`collection` route that actually serves the action. Prove the change is behavior-neutral on the current version by diffing a sorted route dump (verb, path, defaults, name) before and after; the dumps must be identical. No dual-boot branch is needed."
+      variable_name: "ROUTES_INVALID_ONLY_EXCEPT"
+
   medium_priority:
     - name: "Redis cache store"
       kind: "optional"
