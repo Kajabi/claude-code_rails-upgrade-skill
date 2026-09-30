@@ -57,3 +57,21 @@ A private or in-house gem that caps Rails (`rails < 8.0`) is a blocker only you 
 - **Read what the re-resolve pulled in.** Unpinned transitive gems can jump a major (e.g. `connection_pool` 2.x → 3.x, which accepts only keyword arguments) and expose latent bugs that consumers pinning the older major don't hit yet. Fix those in the gem before a consumer lifts the pin.
 
 Found on kajabi-products' 7.2 → 8.0 hop: `kj_notify` CI ran only Rails 7.0.8.7 while the host ran 7.2. Its 7.2 matrix lockfile resolved `connection_pool` 3.0.2 and 14 specs failed on a positional-hash `ConnectionPool.new` call.
+
+---
+
+## Major bumps of a gem your code subclasses
+
+When the only compatible version of a gem is a new major, and the app subclasses its classes (`ActiveInteraction::Base`, service-object bases, form objects), the changelog's "Upgrading" notes are necessary but not enough. Before planning slices:
+
+- **Diff the API surface, not just the changelog.** Load each version in isolation (`gem install <gem> -v X --install-dir <tmp> --ignore-dependencies`, then `GEM_PATH=<tmp>:$(gem env gempath) ruby -e 'gem "<gem>", ARGV[0]; require ...'`). Diff `public_instance_methods`, `private_instance_methods`, and the methods on any value objects the app touches, minus `Object`'s. Removed methods are call sites to fix. **Added private methods are collision risks:** a subclass method or input with the same name now overrides framework behavior. A subclass that defines the same name replaces the framework step silently, with no error.
+- **Reproduce each break in a ten-line script against both versions.** It confirms which breaks raise and which silently change behavior, and gives the PR body concrete evidence.
+- **Resolve the enclosing class before counting a hit.** Name-based AST scans over-count: a `def filter` on a nested `View` or finder class inside an interaction file isn't an override. Walk the Prism tree and record the class stack for every hit. The same applies to spec rewrites: `subject.<name>` may refer to a nested object, not the class being renamed.
+- **Split by what works on both versions.** Renames, `.to_h` conversions and reserved-name changes usually do, so they ship as independent slices ahead of the bump. Changes that need the new API on one side and the old on the other (a method that moved objects, a renamed callback) ride with the bump.
+- **Add a guard spec to the bump PR** for any silent failure mode, e.g. "no descendant overrides the framework's private step", so it can't come back after the upgrade.
+
+Found on kajabi-products' `active_interaction` 4.1 → 5.5 (needed for Rails 8.0). 5.0 adds a private `Base#filter` that runs input validation.
+- Two interactions defined their own `filter`. On 5.5 one skipped type checks entirely, and the other raised `ArgumentError` on every call.
+- Three declared `string :filter`, now a reserved name, which raised at class load.
+- `Inputs` stopped being a Hash, so 45 `**inputs` splats raised `TypeError`.
+- None of this was in the gem's upgrade notes. The first scan counted 7 overrides; only 2 were on interactions.

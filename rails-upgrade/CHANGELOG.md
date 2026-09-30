@@ -1,6 +1,14 @@
 # Changelog
 
 ## Unreleased
+- Added "Major bumps of a gem your code subclasses" to `references/gem-compatibility.md`:
+  - diff the gem's public/private method sets between versions, because a newly added private method can silently collide with subclass methods
+  - reproduce each break against both versions
+  - resolve the enclosing class for AST hits
+  - split both-version fixes into slices ahead of the bump
+  - guard silent failure modes with a spec in the bump PR
+
+  Found on `active_interaction` 4.1 → 5.5: its new private `Base#filter` disabled input validation in one interaction and raised on every call in another, and none of it was in the upgrade notes.
 - Boot smoke test (Step 4.6): added "Large apps: find every failure in one pass". It covers:
   - `DEPENDENCIES_NEXT=1 bundle lock` writes to `Gemfile.lock` under bootboot 0.2.2; use `--lockfile=Gemfile_next.lock`.
   - Getting past a known resolve blocker with a next-side-only pin, to find the rest.
