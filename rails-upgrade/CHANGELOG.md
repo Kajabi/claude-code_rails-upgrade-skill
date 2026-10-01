@@ -1,6 +1,14 @@
 # Changelog
 
 ## Unreleased
+- `references/gem-compatibility.md`: added "What the gem now does to the values you pass it":
+  - grep the new gem version for comparisons on caller values; `value == nil` calls the value's `#==`, which loads `AssociationRelation`/`CollectionProxy` inputs and trips app `#==` methods that assume the same class
+  - nil handling of required inputs can flip (`object ..., class: Object`); find them by walking loaded filters, keep old behavior with `default: nil`
+  - error output reshapes (paths, collapsed array errors, kept detail options); decide per user-facing site
+  - narrow prepend patches need a version check and a spec that fails without them
+  - reproduce from CI's failing ids and separate environment failures by running them on the old version
+
+  Found on `active_interaction` 4.1 → 5.5 after a local "0 failures" run that CI contradicted with 166.
 - Added "Major bumps of a gem your code subclasses" to `references/gem-compatibility.md`:
   - diff the gem's public/private method sets between versions, because a newly added private method can silently collide with subclass methods
   - reproduce each break against both versions

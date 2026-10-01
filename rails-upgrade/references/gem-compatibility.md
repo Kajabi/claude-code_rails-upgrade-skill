@@ -75,3 +75,17 @@ Found on kajabi-products' `active_interaction` 4.1 → 5.5 (needed for Rails 8.0
 - Three declared `string :filter`, now a reserved name, which raised at class load.
 - `Inputs` stopped being a Hash, so 45 `**inputs` splats raised `TypeError`.
 - None of this was in the gem's upgrade notes. The first scan counted 7 overrides; only 2 were on interactions.
+
+### What the gem now does *to* the values you pass it
+
+The method-set diff finds what the gem exposes. It misses what the gem does with your objects. Grep the new version for comparisons and coercions on caller-supplied values (`== nil`, `===`, `==`, `to_s`, `present?`, `as_json`) and ask what each dispatches to on the objects your app passes in:
+
+- **`value == nil` calls the value's own `#==`.** `ActiveRecord::AssociationRelation#==` (`other == records`) and `CollectionProxy#==` (`load_target == other`) load every row. So an association scope passed as an input is fully loaded during validation, and the relation comes back loaded and stale. A plain `Relation#==` doesn't load. App classes with a `#==` that assumes `other` is the same class (`super unless other.is_a?(self.class)` without `return`) raise `NoMethodError` on nil. Probe it: pass `site.things.where(...)` and `site.things` into an interaction under each version and check `loaded?`.
+- **Nil handling of required inputs can flip.** `object :x, class: Object` accepted `nil` and an omitted key on 4.1 (`nil.is_a?(Object)`); 5.x rejects nil first, so `run!` now raises. Find every such input by loading the app and walking `klass.filters` (grep misses filters declared in included concerns), confirm the old/new behavior in a ten-line script per version, and keep the old result with `default: nil`.
+- **Error output reshapes without behavior changes.** Nested errors become paths (`filters.start_date`, `asset.mime_type`), array-of-hash errors collapse to the array unless `index_errors: true`, merged model errors keep detail options (`value:`). Anything that turns `errors` into user-facing text or API JSON (`errors.attribute_names`, JSON:API pointers built from the attribute) changes with it. Decide per site whether to restore specificity (`index_errors: true`, take the first path segment) or accept the new text.
+
+When a gem behavior can't be fixed in app code (here, the gem's own `value == nil`), a narrow prepend that copies the method bodies is acceptable if it has a version check that warns on any gem version change and a spec that fails without the patch.
+
+**Reproduce from CI's failing ids, not a local green run.** A worker reported "631 examples, 0 failures" locally; CI on the same branch had 166 failures. Pull the exact failing example ids from CI, run those files, and separate environment failures (frontend asset build, WebMock-blocked fetches) from upgrade failures by running the same examples on the old-version branch. An example that fails on both is environment noise.
+
+Found on the same bump: the `value == nil` load hit `Commerce::Searches::PaymentTransactionSearch` (it received `site.payment_transactions...`), 26 `class: Object` inputs changed nil handling, and 4 app `#==` methods raised on nil.
