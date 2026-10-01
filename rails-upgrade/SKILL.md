@@ -252,6 +252,7 @@ If user requests a multi-hop upgrade (e.g., 5.2 → 8.1):
 - `references/multi-hop-strategy.md` - Multi-version planning
 - `references/testing-checklist.md` - Comprehensive testing
 - `references/gem-compatibility.md` - Gem update order and the "no compatible version" playbook (fork / vendor / replace). Load only when Step 4.5's compatibility check produced blockers.
+- `references/proving-mechanical-refactors.md` - Before/after artifact dump, mutation test and post-release stored-value check for mechanical refactors (e.g. declaration-syntax removals). Load in Step 6 when a fix spans many call sites.
 - `references/js-compressor-sprockets-mismatch.md` - Keeping terser / closure-compiler working when the target Rails pins Sprockets to the 2.x line. Load only when JS_COMPRESSOR_GEM_MISMATCH fires.
 
 ### Detection Pattern Resources
@@ -300,6 +301,22 @@ When user requests an upgrade, follow this workflow:
    - Run the safe read-only smoke baseline: Rails boot, test-env boot when possible, routes load, migration status, and asset/build command if present
    - Record baseline confidence as partial
    - Continue only if boot/routes checks pass and the user accepts the risk of proceeding without real tests
+5b. If a suite exists but is too large to run locally (large monolith):
+   - Some repos explicitly forbid a full local suite run (hours of runtime, or
+     the suite only resolves against CI-provisioned services). The repo's own
+     contribution guide is authoritative — if it says "do not run the full
+     suite locally", honor that instead of this step's default.
+   - Substitute a CI-derived baseline: read the status of the most recent
+     completed run of the REQUIRED workflow on the base branch (CircleCI,
+     GitHub Actions, etc.). A green run on the base branch is the baseline.
+   - Record which pipeline/run supplied the baseline (provider, number, SHA,
+     timestamp) so the post-upgrade comparison is against a known point.
+   - Locally, run only the targeted specs implicated by the hop's detection
+     findings (Step 4), not the whole suite.
+   - Record baseline confidence as ci-verified. This is stronger than the
+     no-test-suite smoke path and weaker than a local full-suite run.
+   - If the base branch is RED, treat it exactly like failing tests below:
+     STOP, and fix or wait for green before starting the hop.
 6. If ANY tests fail:
    - STOP the upgrade process
    - Report failing tests to user
@@ -374,6 +391,13 @@ Determines which gems must be bumped before the Rails version change can resolve
 3. If any blockers exist, load references/gem-compatibility.md for
    the fork/replace/vendor playbook and the gem update order. Skip
    otherwise.
+4. Run the "Resolver dry-run and pre-load pass" in the same workflow:
+   resolve the whole bundle against the target Rails in a scratch
+   worktree, then classify every gem that moves as must-move-with-bump,
+   pre-loadable (ship ahead at the latest version, in small PRs) or
+   incidental (pin in the bump PR). This is the only check that sees
+   path gems and private-registry gems, and it shrinks the eventual
+   bump PR to Rails itself. Re-run it as fix-before-bump work lands.
 ```
 
 ### Step 4.6: Boot Smoke Test on the Next Dependency Set
@@ -434,8 +458,10 @@ instead of mid-implementation.
 4. Update the Gemfile's next-side conditional to the target Rails version (and any required gem bumps), then run `bundle install` so both Gemfile.lock and Gemfile_next.lock update
 5. Run test suite against both versions (`bundle exec rspec` and `DEPENDENCIES_NEXT=1 bundle exec rspec`)
 6. **Check CI config matches the upgraded Gemfile** — load `workflows/ci-sync-workflow.md`, fix any mismatches before proceeding
-7. Deploy and verify
+7. Deploy and verify. For each fix-before-bump release, confirm it reaches 100% of production (sample the deployed version, not just the first response), then compare new errors and error rate before and after. If the repo has a rollout-monitoring skill (e.g. `monitor-rollout`), use it. Release risky slices (money paths, unusual load paths) on their own so a regression is attributable.
 ```
+
+For mechanical fix-before-bump refactors that span many call sites (declaration-syntax removals, method renames), specs alone don't prove behavior is unchanged. Load `references/proving-mechanical-refactors.md` for the before/after artifact dump, the mutation test that proves the dump can fail, and the post-release stored-value check.
 
 **Do not fix `load_defaults`-triggered runtime deprecation warnings about *future* Rails versions during this hop.** This caveat covers post-bump runtime warnings emitted by Rails X+1 about behavior scheduled to change in X+2 — typically surfaced once `load_defaults X.Y` flips on in Step 7. Those belong to the *next* upgrade cycle and are addressed before the next version bump.
 
@@ -452,6 +478,67 @@ Triaging tomorrow's deprecation warnings now expands the scope of the current ho
 3. Tests are re-run between each change
 4. Consolidates into config/application.rb when done
 ```
+
+**Accumulated defaults debt (load_defaults lags the installed Rails by more than one version)**
+
+An app can sit on Rails X while `config.load_defaults` still reads X-2 or X-3,
+because each prior hop shipped the gem bump without finishing the defaults
+alignment. Check for this at Step 0, not at Step 7 — it changes how much
+pre-work the hop carries:
+
+1. Read `config.load_defaults` from `config/application.rb`.
+2. List `config/initializers/new_framework_defaults_*.rb`. One file per
+   un-flipped version; each is its own backlog. A file's presence means that
+   version's defaults are NOT yet active.
+3. Per file, count active vs commented flags — do not trust a ticket's counts,
+   which go stale as flags land one at a time. The file on the base branch is
+   the only source of truth.
+4. Report the total as `<n> files / <m> flags` of accumulated debt.
+
+**Sequencing:** the flags are independently shippable and revertable, and none
+of them depend on the gem version, so accumulated debt does NOT block the next
+version bump. But do not carry a *partially* applied defaults file across a
+hop — finish any file that is already part-flipped before bumping, so the app
+isn't running a half-applied defaults set while its framework version moves.
+Files that are untouched (zero flags flipped) can trail the bump safely.
+
+**Flags that need more than "flip and run specs"** — pull these out of the
+bulk backlog and give each its own change, because a green suite does not
+prove them safe:
+- `cookies_serializer` — needs the two-phase `:hybrid` migration in production
+  or live sessions are invalidated on deploy.
+- `key_generator_hash_digest_class` / `hash_digest_class` — changes derived
+  keys, so signed cookies and cache entries invalidate at deploy time. Before
+  planning the rotation, grep for bare `ActiveSupport::KeyGenerator.new(secret)`
+  (no `hash_digest_class:`) used to encrypt data at rest. Those follow the
+  global class default too, and rotation doesn't cover stored ciphertext. Pin
+  the current digest explicitly at those call sites first, and prove it with a
+  spec that encrypts, switches the global, then decrypts.
+- `raise_on_open_redirects` — converts latent redirect bugs into 500s.
+- `active_record.partial_inserts` — changes the INSERT shape for every model.
+- `active_storage.variant_processor` — swaps the image-processing backend.
+
+**Before counting or flipping, check what each flag actually does in this app:**
+- Diff the commented flags against the `load_defaults` source of the Rails
+  version you're on (`railties-X/lib/rails/application/configuration.rb`).
+  Flags a later version removed (e.g. `disable_to_s_conversion`,
+  `use_rfc4122_namespaced_uuids` by 7.2) are no-ops. So are flags already set
+  elsewhere (`config/application.rb`, a dedicated initializer), and framework
+  sections that aren't loaded (`load_defaults` guards each one with
+  `respond_to?(:active_storage)` etc.).
+- Verify a flipped flag's **effective** value, not the config value: e.g.
+  `bin/rails runner 'p ActiveRecord::Base.automatic_scope_inversing'`.
+  `ActiveRecord::Base`-level settings (`automatic_scope_inversing`,
+  `partial_inserts`, …) are copied from config only in the `on_load(:active_record)`
+  hook. If any earlier initializer loads `ActiveRecord::Base` (a top-level
+  `ActiveRecord::Base.include(...)`, or a gem ORM such as doorkeeper), a flag set
+  in `new_framework_defaults_*.rb` is silently ignored. The flag then
+  switches on at the `load_defaults` bump instead, as an unplanned behavior
+  change. Set Base-level flags in `config/application.rb`. Module-level
+  settings (`ActiveRecord.x=`) are re-applied after initialize and are
+  unaffected.
+- For association flags, dump every reflection's `inverse_of` with the flag
+  off and on and diff the two lists. That is the exact blast radius.
 
 ### Step 8: Mention Cleanup (USER-TRIGGERED)
 ```

@@ -124,6 +124,19 @@ Grep:
 
 Same process for `upgrade_findings.medium_priority` and `upgrade_findings.low_priority` patterns.
 
+### Step 3b: App-level version gates (not in any pattern file)
+
+Pattern files only know Rails' own APIs. Apps often wrap monkey-patches and backports in their own version checks: `Rails.version.start_with?("7.2")`, `Rails::VERSION::MINOR == 2`, or helpers such as `AppConfig.rails_7_2?`. Grep for these and read every hit:
+
+```
+grep -rnE 'Rails::VERSION::(MAJOR|MINOR|STRING)|Rails\.(version|gem_version)|rails_[0-9]+_[0-9]+\?' app lib config --include='*.rb'
+```
+
+Classify each gate:
+
+- **Strict-equality gates on the current version** (`== 7.2`, `unless rails_7_2?`) flip to the "other" branch on the target. If that branch warns or raises, it becomes a fix-before-bump finding. Check this especially when the app raises on un-allow-listed deprecations in dev/test: a `Rails.deprecator.warn("only tested with 7.2")` turns into a boot failure there. Widen the gate once you've checked the code it guards against the target.
+- **Gates for versions the app no longer runs** (a `rails_7_1?` helper on a 7.2 app) are dead code. Remove them in the same pre-work so the bump PR's diff stays about the bump.
+
 ---
 
 ### Step 4: Compile Findings (group by `kind`, sub-order by `priority`)
@@ -225,6 +238,20 @@ Run the search, then filter results in analysis.
 
 **Search multiple paths:**
 Make separate Grep calls for each path, or use a parent directory.
+
+### ⚠️ Regex dialect — a wrong engine reports false zeros
+
+The `pattern:` values in `rails-*-patterns.yml` use Perl-style escapes (`\s`, `\b`, `\w`, `\d`) — about 150 lines across the pattern files. The Grep tool is ripgrep-based and supports them. **Most other greps do not, and they fail silently**: the pattern still runs, simply matching nothing, so a real finding comes back as a clean zero.
+
+Common ways this happens:
+
+- `git grep -E` and `grep -E` use POSIX ERE, where `\s` and `\b` are not recognised. Use `git grep -P` (PCRE) instead — never `-E`.
+- Reading a branch you haven't checked out (e.g. `git grep <pattern> origin/main -- <paths>`) tempts a switch away from the Grep tool. That is fine, as long as you add `-P`.
+- BSD `grep` on macOS has no `-P` at all. Use the Grep tool or `rg`.
+
+Measured on a real app, the Rails 8.0 `enum`-keyword-arguments pattern — a hard boot failure at 8.0 — returned **0** hits under `git grep -E` and **34** under `git grep -P`. The dialect mistake would have declared the upgrade's biggest breaking change clean.
+
+**Before trusting any zero, prove the engine works.** Run one pattern you *know* matches (e.g. `^\s*class\s+\w+` over `app/models`). If that returns nothing, your engine is ignoring the escapes, and every zero in the run is suspect. Record in the report which engine and flags produced the results.
 
 ### Using Glob to Find Files
 

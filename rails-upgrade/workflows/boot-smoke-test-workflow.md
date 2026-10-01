@@ -74,6 +74,44 @@ For each offending gem:
 
 Repeat steps 1–3 until boot succeeds under `DEPENDENCIES_NEXT=1`. Then proceed to Step 5.
 
+## Large apps: find every failure in one pass
+
+On a large app, boot-fix-reboot finds one failure per boot. That's slow, and it hides how much work is left. These techniques come from the kajabi-products 7.2 → 8.0 smoke run, where a 12k-file app went from "does not resolve" to a complete blocker list in one session.
+
+**Resolve into the right lockfile.** With bootboot 0.2.2, `DEPENDENCIES_NEXT=1 bundle lock` writes the next-side resolution into **`Gemfile.lock`**: bootboot's lockfile swap doesn't apply to `bundle lock`. Use `DEPENDENCIES_NEXT=1 bundle lock --lockfile=Gemfile_next.lock` or `DEPENDENCIES_NEXT=1 bundle install`. Confirm `git diff --stat Gemfile.lock` is empty afterwards.
+
+**Get past a known resolve blocker to find the rest.** When the resolver stops on a blocker that already has a ticket, give the next side alone the newer version, then re-resolve. Use an `if ENV["DEPENDENCIES_NEXT"] == "1"` pin, e.g. `active_interaction ~> 5.5` while the current side stays on 4.1. Keep going until the bundle resolves. Afterwards, diff the two lockfiles' `specs:` sections: every gem that moved is either must-move-with-bump or already has a ticket.
+
+**Load every constant and collect failures instead of stopping at the first.** `Rails.application.eager_load!` raises on the first bad file. Instead, walk Zeitwerk's expected constants and record each failure:
+
+```ruby
+# DEPENDENCIES_NEXT=1 RAILS_ENV=test bin/rails runner scan.rb
+errors = Hash.new { |h, k| h[k] = [] }
+Rails.autoloaders.each do |loader|
+  loader.all_expected_cpaths.each do |path, cpath|
+    next unless path.end_with?(".rb")
+    Object.const_get(cpath)
+  rescue Exception => e
+    frame = e.backtrace&.find { |l| l.start_with?(Rails.root.to_s) }
+    errors["#{e.class}: #{e.message.lines.first.strip[0, 160]}"] << "#{path} @ #{frame}"
+  end
+end
+errors.sort_by { |_, v| -v.size }.each { |k, v| puts "[#{v.size}] #{k}", v.first(4).map { "   #{_1}" } }
+```
+
+Then **run the same scan on the current side**. Anything that also fails there, such as a spec file under a component-preview path, is a baseline artifact rather than a hop blocker. Report only the difference.
+
+**Expect app-level failures, not only gem ones.** At 7.2 → 8.0 the first three boot failures came from the app's own code:
+- **Version tripwires** left by the previous hop, e.g. `raise "Please remove this!" unless Rails.version < "8.0"`. Replace them with a guard that works on both versions, such as `if Rails.gem_version < Gem::Version.new("8.0")`.
+- **Deprecation subscribers that raise in dev/test.** The target Rails emits deprecations about the version after it (8.0 warns about 8.1's `to_time` behavior). Add these to the allow-list rather than flipping the behavior. They belong to the next hop (see "Do not fix load_defaults-triggered runtime deprecation warnings about future Rails versions" in SKILL.md).
+- **Rails 8.0 raises on invalid `resources … only:/except:` actions**, which 7.2 ignored. The error only names the first offender. To list every offender, temporarily prepend a module to `ActionDispatch::Routing::Mapper::Resources::Resource#invalid_only_except_options` in an uncommitted initializer. Have it log the `config/routes` caller and return `[]`. Prove the fix by dumping `routes.map { [verb, path.spec, defaults, name] }.sort` before and after on the current side; the dumps must be identical.
+
+**Boot all three environments.** Development, test and production load differently: production eager-loads during boot. Run the production boot on both sides against a local DB (`DATABASE_URL`, `SECRET_KEY_BASE=dummy`, plus whatever `RAILS_SERVE_STATIC_FILES` / env vars the app needs). Only differences between the two sides count.
+
+**Check how CI sets the variable.** Some CI configs export `DEPENDENCIES_NEXT=<param>` with a default of `0`. The string `"0"` is truthy to bootboot and to plain `if ENV["DEPENDENCIES_NEXT"]` code guards. Before the next side diverges from the current one, confirm that the Gemfile's `enable_dual_booting` guard compares to `"1"` and that no app code checks the variable for mere presence. Otherwise default CI silently runs against `Gemfile_next.lock`.
+
+**Split the work into two PRs.** Put the fixes that behave the same on both versions (routes, tripwires, allow-list entries) in a pre-work PR off the base branch. Keep the `Gemfile_next` PR to `Gemfile` + `Gemfile_next.lock`, stacked on any resolve-blocker PR it needs.
+
 ## Output
 
 A short report block to merge into Step 5's Comprehensive Upgrade Report:
