@@ -48,44 +48,21 @@ If `bundle_report` flags one of these, check the target version guide before ass
 
 ## Gems your organization owns
 
-A private or in-house gem that caps Rails (`rails < 8.0`) is a blocker only you can clear. Widening the gemspec ceiling unblocks the resolver, but it doesn't show that the gem works on the target. Check the gem's own CI before relying on the widened release:
+A private gem that caps Rails (`rails < 8.0`) is a blocker only you can clear. Widening the gemspec ceiling unblocks the resolver but doesn't show the gem works on the target:
 
-- **Which Rails does its CI actually run?** A gem's CI often tests only the Rails pinned in its development `Gemfile.lock`, which can be several minors behind every consumer. A green run then says nothing about the versions that matter.
-- **Add a matrix of consumer versions.** Keep the gem's own `Gemfile` as is (it may also build a service image). Read the Rails requirement from an env var with the old pin as the default, add one `gemfiles/rails_X_Y.gemfile` per version that sets the var and calls `eval_gemfile File.expand_path("../Gemfile", __dir__)`, and select them in CI with `BUNDLE_GEMFILE`. In GitHub Actions, make the Rails version a real matrix axis and use `include` only to attach each gemfile. When a key is defined only in `include`, later entries overwrite earlier ones and the matrix collapses to one job.
-- **Seed each matrix lockfile from the main one** (`cp Gemfile.lock gemfiles/rails_X_Y.gemfile.lock`, then `bundle lock --update rails <test gems>`). A fresh resolve can fail on `git:` dependencies whose branch no longer exists upstream; the locked revision still resolves.
-- **Expect the test tooling to move.** Old `rspec-rails` / `database_cleaner-active_record` / `shoulda-matchers` versions often don't load on newer Rails, so the matrix lockfiles carry newer ones.
-- **Read what the re-resolve pulled in.** Unpinned transitive gems can jump a major (e.g. `connection_pool` 2.x → 3.x, which accepts only keyword arguments) and expose latent bugs that consumers pinning the older major don't hit yet. Fix those in the gem before a consumer lifts the pin.
-
-Found on kajabi-products' 7.2 → 8.0 hop: `kj_notify` CI ran only Rails 7.0.8.7 while the host ran 7.2. Its 7.2 matrix lockfile resolved `connection_pool` 3.0.2 and 14 specs failed on a positional-hash `ConnectionPool.new` call.
+- **Check which Rails its CI runs.** Gem CI often tests only the Rails in the gem's own `Gemfile.lock`, which can lag every consumer.
+- **Add a matrix of consumer versions.** One `gemfiles/rails_X_Y.gemfile` per version that sets the Rails requirement and `eval_gemfile`s the main Gemfile, selected in CI with `BUNDLE_GEMFILE`. Seed each matrix lockfile from the main one (`cp`, then `bundle lock --update rails <test gems>`) so `git:` dependencies keep their locked revisions.
+- **Read what the re-resolve pulled in.** Unpinned transitive gems can jump a major and expose latent bugs (e.g. `connection_pool` 3.x accepts only keyword arguments). Fix those in the gem before a consumer lifts its pin.
 
 ---
 
 ## Major bumps of a gem your code subclasses
 
-When the only compatible version of a gem is a new major, and the app subclasses its classes (`ActiveInteraction::Base`, service-object bases, form objects), the changelog's "Upgrading" notes are necessary but not enough. Before planning slices:
+When the only compatible version is a new major and the app subclasses the gem's classes (service-object bases, form objects, interactors), the changelog's upgrade notes are not enough:
 
-- **Diff the API surface, not just the changelog.** Load each version in isolation (`gem install <gem> -v X --install-dir <tmp> --ignore-dependencies`, then `GEM_PATH=<tmp>:$(gem env gempath) ruby -e 'gem "<gem>", ARGV[0]; require ...'`). Diff `public_instance_methods`, `private_instance_methods`, and the methods on any value objects the app touches, minus `Object`'s. Removed methods are call sites to fix. **Added private methods are collision risks:** a subclass method or input with the same name now overrides framework behavior. A subclass that defines the same name replaces the framework step silently, with no error.
-- **Reproduce each break in a ten-line script against both versions.** It confirms which breaks raise and which silently change behavior, and gives the PR body concrete evidence.
-- **Resolve the enclosing class before counting a hit.** Name-based AST scans over-count: a `def filter` on a nested `View` or finder class inside an interaction file isn't an override. Walk the Prism tree and record the class stack for every hit. The same applies to spec rewrites: `subject.<name>` may refer to a nested object, not the class being renamed.
-- **Split by what works on both versions.** Renames, `.to_h` conversions and reserved-name changes usually do, so they ship as independent slices ahead of the bump. Changes that need the new API on one side and the old on the other (a method that moved objects, a renamed callback) ride with the bump.
-- **Add a guard spec to the bump PR** for any silent failure mode, e.g. "no descendant overrides the framework's private step", so it can't come back after the upgrade.
-
-Found on kajabi-products' `active_interaction` 4.1 → 5.5 (needed for Rails 8.0). 5.0 adds a private `Base#filter` that runs input validation.
-- Two interactions defined their own `filter`. On 5.5 one skipped type checks entirely, and the other raised `ArgumentError` on every call.
-- Three declared `string :filter`, now a reserved name, which raised at class load.
-- `Inputs` stopped being a Hash, so 45 `**inputs` splats raised `TypeError`.
-- None of this was in the gem's upgrade notes. The first scan counted 7 overrides; only 2 were on interactions.
-
-### What the gem now does *to* the values you pass it
-
-The method-set diff finds what the gem exposes. It misses what the gem does with your objects. Grep the new version for comparisons and coercions on caller-supplied values (`== nil`, `===`, `==`, `to_s`, `present?`, `as_json`) and ask what each dispatches to on the objects your app passes in:
-
-- **`value == nil` calls the value's own `#==`.** `ActiveRecord::AssociationRelation#==` (`other == records`) and `CollectionProxy#==` (`load_target == other`) load every row. So an association scope passed as an input is fully loaded during validation, and the relation comes back loaded and stale. A plain `Relation#==` doesn't load. App classes with a `#==` that assumes `other` is the same class (`super unless other.is_a?(self.class)` without `return`) raise `NoMethodError` on nil. Probe it: pass `site.things.where(...)` and `site.things` into an interaction under each version and check `loaded?`.
-- **Nil handling of required inputs can flip.** `object :x, class: Object` accepted `nil` and an omitted key on 4.1 (`nil.is_a?(Object)`); 5.x rejects nil first, so `run!` now raises. Find every such input by loading the app and walking `klass.filters` (grep misses filters declared in included concerns), confirm the old/new behavior in a ten-line script per version, and keep the old result with `default: nil`.
-- **Error output reshapes without behavior changes.** Nested errors become paths (`filters.start_date`, `asset.mime_type`), array-of-hash errors collapse to the array unless `index_errors: true`, merged model errors keep detail options (`value:`). Anything that turns `errors` into user-facing text or API JSON (`errors.attribute_names`, JSON:API pointers built from the attribute) changes with it. Decide per site whether to restore specificity (`index_errors: true`, take the first path segment) or accept the new text.
-
-When a gem behavior can't be fixed in app code (here, the gem's own `value == nil`), a narrow prepend that copies the method bodies is acceptable if it has a version check that warns on any gem version change and a spec that fails without the patch.
-
-**Reproduce from CI's failing ids, not a local green run.** A worker reported "631 examples, 0 failures" locally; CI on the same branch had 166 failures. Pull the exact failing example ids from CI, run those files, and separate environment failures (frontend asset build, WebMock-blocked fetches) from upgrade failures by running the same examples on the old-version branch. An example that fails on both is environment noise.
-
-Found on the same bump: the `value == nil` load hit `Commerce::Searches::PaymentTransactionSearch` (it received `site.payment_transactions...`), 26 `class: Object` inputs changed nil handling, and 4 app `#==` methods raised on nil.
+- **Diff the API surface.** Install each version into a temp dir and diff `public_instance_methods` and `private_instance_methods` (minus `Object`'s) on the base classes and any value objects the app touches. Removed methods are call sites to fix. **Added private methods are collision risks:** a subclass method with the same name silently replaces the framework step.
+- **Reproduce each break in a short script against both versions**, to see which breaks raise and which silently change behavior.
+- **Resolve the enclosing class before counting a hit.** Name-based scans over-count; walk the AST and record the class stack for each match.
+- **Check what the gem now does to the values you pass it.** Grep the new version for comparisons and coercions on caller-supplied values (`== nil`, `==`, `===`, `to_s`, `present?`). `value == nil` dispatches to the value's own `#==`: an `ActiveRecord::AssociationRelation` or `CollectionProxy` loads every row, and an app `#==` that assumes the same class can raise on nil. Also check nil handling of required inputs and the shape of error output (keys, paths, messages) wherever it reaches users or API clients.
+- **Split by what works on both versions.** Ship those changes as slices ahead of the bump; keep changes that need the new API on one side with the bump.
+- **Guard silent failure modes with a spec** in the bump PR (e.g. "no subclass overrides the framework's private step"). If a gem behavior can only be fixed with a prepend patch, give it a version check that warns when the gem version changes and a spec that fails without it.

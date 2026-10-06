@@ -22,7 +22,7 @@ upgrade_findings:
         - "app/"
         - "lib/"
         - "engines/"
-      explanation: "Rails 8.0 removes the keyword-arguments form of enum (`enum status: { ... }, _prefix: true`). The 7.0 / 7.1 hash form (`enum :status, { ... }, prefix: true`) is now the only supported syntax. activerecord/CHANGELOG.md: 'Remove deprecated support for defining `enum` with keyword arguments.' Models still using the old form raise ArgumentError on class load — the app fails to boot. THIS PATTERN ONLY SEES THE SINGLE-LINE FORM. The multi-line `enum(` form is covered by the companion pattern ENUM_KWARGS_MULTILINE, and even the pair cannot prove absence — see its explanation for the authoritative check"
+      explanation: "Rails 8.0 removes the keyword-arguments form of enum (`enum status: { ... }, _prefix: true`). The 7.0 / 7.1 hash form (`enum :status, { ... }, prefix: true`) is now the only supported syntax. activerecord/CHANGELOG.md: 'Remove deprecated support for defining `enum` with keyword arguments.' Models still using the old form raise ArgumentError on class load — the app fails to boot. This pattern sees only the single-line form; ENUM_KWARGS_MULTILINE covers multi-line `enum(` calls"
       fix: "Convert to the explicit form: `enum :status, { active: 0, archived: 1 }, prefix: true`. Mechanical migration; no runtime behavior change once converted"
       variable_name: "ENUM_KWARGS"
 
@@ -34,7 +34,7 @@ upgrade_findings:
         - "app/"
         - "lib/"
         - "engines/"
-      explanation: "Companion to ENUM_KWARGS for the parenthesized form that spans lines — `enum(` on its own line followed by `status: { ... },` and options on later lines. A line regex cannot see across lines, so ENUM_KWARGS misses every one of these. Measured on a large app: ENUM_KWARGS alone found 36 sites; the real total was 183 (a 5x undercount), most of them multi-line. This pattern flags the opening line for review. It can false-positive on a multi-line POSITIONAL call (`enum(` then `:status, ...`), so read each hit. NEITHER pattern can prove absence. Authoritative checks, strongest first: (1) runtime — eager-load the app with the enum deprecation removed from any allow-list, or count distinct call sites calling `enum` with a nil name. The hook MUST be installed before Rails boots (e.g. a TracePoint on ActiveRecord::Enum#enum loaded via RUBYOPT): a deprecation subscriber added from `rails runner` or an initializer misses every class already loaded during boot, which in a large app includes core models like Site, User and Account — measured on kajabi-products, a post-boot subscriber recorded 0 hits after `user.rb` was reverted to the keyword form. Runtime checks also miss files that are not eager-loaded (lib/, engine models loaded separately), so require those explicitly. (2) an AST scan (e.g. Prism) for `enum` calls with no positional arguments and a keyword-hash first argument — covers every file regardless of load path. Use both when the count matters"
+      explanation: "Companion to ENUM_KWARGS for parenthesized calls that span lines (`enum(` on its own line, keyword hash below), which a line regex can't see; in large apps these are often the majority. Flags the opening line for review and can false-positive on multi-line positional calls. Neither pattern proves absence. Authoritative checks: an AST scan for `enum` calls with no positional argument, and a runtime count of the deprecation whose hook is installed before Rails boots (a subscriber added from an initializer misses classes loaded during boot) with non-eager-loaded files required explicitly"
       fix: "Change the first keyword key to a positional symbol and drop the underscore from options: `enum(status: {...}, _prefix: true)` becomes `enum(:status, {...}, prefix: true)`. Prefer an AST-based rewrite over regex for multi-line calls, and preserve computed values (e.g. `EVENTS.zip(EVENTS).to_h`) byte-for-byte"
       variable_name: "ENUM_KWARGS_MULTILINE"
 
@@ -49,7 +49,7 @@ upgrade_findings:
         - "engines/"
         - "spec/"
         - "test/"
-      explanation: "activesupport 8.0 adds `uri >= 0.13.1` as a new runtime dependency (7.2 has none). Ruby 3.0 removed URI.escape/unescape/encode/decode, but the uri gem's 0.10.x line still defines them — so an app pinning uri ~> 0.10 (common, to guarantee the CVE-2023-28755 fix) keeps calling them without warning. Moving to uri >= 0.13.1 deletes them and every call raises NoMethodError. Gems can depend on them too: e.g. paypalhttp 1.0.1 form-encodes request bodies with URI.escape, and paypal-checkout-sdk pins paypalhttp ~> 1.0.1, so every PayPal token request breaks. Search specs too — test helpers use these methods, and a grep limited to app/ misses them. Grep cannot see gem callers that run at load time; run the full suite on the moved pin as part of detection"
+      explanation: "activesupport 8.0 adds `uri >= 0.13.1` as a runtime dependency. The uri 0.10.x line still defines URI.escape/unescape/encode/decode (removed from Ruby 3.0), so an app pinning uri ~> 0.10 calls them without warning; on uri >= 0.13.1 every call raises NoMethodError. Gems can call them too, which grep can't see; boot and run the suite on the moved pin. Search specs as well — test helpers use these methods"
       fix: "Replace with URI::RFC2396_PARSER.escape / .unescape, which is what the removed methods delegated to, so behavior is unchanged. For a gem you can't change, prepend a small patch to the affected method (with a comment naming the gem and why), rather than restoring a global URI.escape that lets new code keep using a removed API. Pin uri to at least the version Ruby ships (e.g. >= 1.0.4 on Ruby 3.4)"
       variable_name: "URI_ESCAPE_REMOVED"
 
@@ -62,8 +62,8 @@ upgrade_findings:
         - "lib/"
         - "config/"
         - "engines/"
-      explanation: "In uri >= 1.0, URI::DEFAULT_PARSER is the RFC 3986 parser. Its `regexp` hash has no :ABS_URI (and other RFC 2396 keys), so `DEFAULT_PARSER.regexp[:ABS_URI]` returns nil and `match?(nil)` raises TypeError. Also check `URI::Parser.new(...)` with arguments: `URI::Parser` is RFC3986_Parser on 1.x and takes no constructor arguments (dartsass-ruby 3.0.x does this at load time and stops the app from booting). DEFAULT_PARSER.escape / unescape and URI.extract still work on 1.x"
-      fix: "Use URI::RFC2396_PARSER.regexp[:ABS_URI] (defined on uri >= 0.13). For gems calling URI::Parser.new(hash), upgrade off the gem: dartsass-sprockets >= 3.1 replaces dartsass-ruby with sassc-embedded"
+      explanation: "In uri >= 1.0, URI::DEFAULT_PARSER is the RFC 3986 parser. Its `regexp` hash has no :ABS_URI (and other RFC 2396 keys), so `DEFAULT_PARSER.regexp[:ABS_URI]` returns nil and `match?(nil)` raises TypeError. Also check `URI::Parser.new(...)` with arguments: on 1.x it takes none, and gems that call it at load time stop the app from booting. DEFAULT_PARSER.escape / unescape and URI.extract still work on 1.x"
+      fix: "Use URI::RFC2396_PARSER.regexp[:ABS_URI] (defined on uri >= 0.13). For gems calling URI::Parser.new(hash), upgrade to a release that doesn't"
       variable_name: "URI_DEFAULT_PARSER_REGEXP"
 
     - name: "assume_ssl configuration"
@@ -98,12 +98,12 @@ upgrade_findings:
 
     - name: "resources only:/except: listing a non-RESTful action"
       kind: "breaking"
-      pattern: "(only|except):\\s*\\[?[^]]*:[a-z_]+"
+      pattern: "(only|except):\\s*\\[?[^\\]]*:[a-z_]+"
       exclude: ""
       search_paths:
         - "config/routes.rb"
         - "config/routes/"
-      explanation: "Rails 8.0 validates `resource`/`resources` `only:` and `except:`. Any action outside the seven RESTful ones (index, create, new, show, update, destroy, edit) raises `ArgumentError: Route `resources :x` - :only and :except must include only [...]` when routes load, so the app fails to boot. Rails 7.2 silently ignored the extra names. They usually sit next to a `member`/`collection` block that already routes the action, so they did nothing. THIS PATTERN IS DELIBERATELY BROAD (every only:/except: matches). Check each match by eye, or use the authoritative check: boot under DEPENDENCIES_NEXT=1 with the collect-don't-raise route scan in workflows/boot-smoke-test-workflow.md ('Expect app-level failures'). The Rails error only names the first offender. Seen at kajabi-products: 4 declarations across 3 route files."
+      explanation: "Rails 8.0 validates `resource`/`resources` `only:` and `except:`. Any action outside the seven RESTful ones raises ArgumentError when routes load, so the app fails to boot; Rails 7.2 silently ignored the extra names, usually next to a `member`/`collection` route that already serves the action. This pattern is deliberately broad (every only:/except: matches), so check each hit, or boot under DEPENDENCIES_NEXT=1 (the Rails error names only the first offender; see workflows/boot-smoke-test-workflow.md)"
       fix: "Remove the non-RESTful names from `only:`/`except:`, and keep or add the `member`/`collection` route that actually serves the action. Prove the change is behavior-neutral on the current version by diffing a sorted route dump (verb, path, defaults, name) before and after; the dumps must be identical. No dual-boot branch is needed."
       variable_name: "ROUTES_INVALID_ONLY_EXCEPT"
 

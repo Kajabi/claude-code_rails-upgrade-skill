@@ -36,67 +36,7 @@ Run a local server on a branch that combines all the refactor PRs, with any "sto
 
 ## 4. Verify stored values in production after release
 
-After each release reaches 100% of production, query the tables it touches. For each rows-written-since-release window, group by the stored value and check it against the allowed set. Focus on declarations whose key differs from the stored value (e.g. key `offer_coupon` stored as `offer`, or `community_based` stored as `community-based`). That is the only mistake that writes wrong data without raising. Read from a replica, and bound each scan to rows written after the release.
+After each release reaches 100% of production, query the tables it touches. For each rows-written-since-release window, group by the stored value and check it against the allowed set. Focus on declarations whose key differs from the stored value (e.g. key `in_progress` stored as `"in-progress"`). That is the only mistake that writes wrong data without raising. Read from a replica, and bound each scan to rows written after the release.
 
 Ship in slices ordered by risk. Put anything with unusual load paths (engines, `lib/`, values built at load time from a file) in its own release, so a problem is easy to attribute.
 
----
-
-## `automatic_scope_inversing` (Rails 7.0 default): audit before adopting
-
-This flag makes Rails willing to use a **scoped** parent association as the
-`inverse_of` for a child `belongs_to` (and vice-versa). It is often treated as a
-free, low-risk default. It is not: it changes in-memory association behavior
-across every scoped association at once.
-
-### Diagnostic: flag-off vs flag-on inverse delta
-
-Boot the app twice (flag off, then on) and dump every scoped association's
-inferred inverse, then diff:
-
-```ruby
-Rails.application.eager_load!
-ActiveRecord::Base.descendants.each do |k|
-  next unless k.respond_to?(:reflect_on_all_associations)
-  k.reflect_on_all_associations.each do |r|
-    next if r.scope.nil?               # only scoped assocs are affected
-    puts "#{k}##{r.name}|#{r.macro}|#{(r.inverse_of&.name).inspect}"
-  end
-end
-```
-
-The diff is the exact blast radius. Set the flag in `config/application.rb`, not
-`new_framework_defaults_*.rb`, or `ActiveRecord::Base`-level flags are silently
-ignored (see SKILL Step 7).
-
-### Audit every changed inverse, not just the ones a failing spec exercises
-
-For each changed association, resolve the child class and check whether the
-inferred inverse's FK genuinely points back (structural correctness), and whether
-**sibling** associations on the same parent point to the same child+FK. In a
-large monolith almost all inferred inverses are structurally correct (the FK
-matches) — the danger is not a wrong reciprocal. The danger is:
-
-1. **Cache pollution.** Assigning the parent on a child (`child.parent = p`, or
-   `Fabricate(:child, parent: p)`) now back-populates the inverse, which **loads
-   the parent's scoped collection** at that moment and caches it. If the child
-   isn't saved yet (or doesn't match the scope), the collection caches empty/stale.
-   Later reads of `p.scoped_assoc` (`.present?`, `.size`, `.each`) see the stale
-   cache, not the DB. This silently breaks clone/duplicate flows, counts, and any
-   "assign then read the collection" code. It does **not** raise.
-2. **Sibling ambiguity.** When several parent associations share one child+FK
-   (e.g. `has_one :occurrence, -> {…}` + `has_many :occurrences, -> {…}`, or many
-   `has_one :media_library_asset_location_*` all with `inverse_of: :location`),
-   only one can be the child's real inverse; back-population targets one of them.
-
-Pinning `inverse_of: false` on the obvious has_many does **not** reliably stop the
-load — the child's `belongs_to` infers the scoped parent independently, and the
-load can come through an indirect path (an `after_create` that assigns the parent,
-a factory). Verify any pin with the flag-on repro, don't assume.
-
-**Recommendation:** treat this flag as its own change with a full inverse-delta
-audit and a per-association verdict, not part of a bulk defaults flip. If adoption
-breaks correct-but-now-active inverses, prefer deferring the global flag (its
-benefit is marginal) or enabling `inverse_of:` explicitly per intended association
-with a dedicated soak, over scattering `inverse_of: false` / collection `reset`
-calls through money paths.

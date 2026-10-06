@@ -1,64 +1,14 @@
 # Changelog
 
 ## Unreleased
-- `references/gem-compatibility.md`: added "What the gem now does to the values you pass it":
-  - grep the new gem version for comparisons on caller values; `value == nil` calls the value's `#==`, which loads `AssociationRelation`/`CollectionProxy` inputs and trips app `#==` methods that assume the same class
-  - nil handling of required inputs can flip (`object ..., class: Object`); find them by walking loaded filters, keep old behavior with `default: nil`
-  - error output reshapes (paths, collapsed array errors, kept detail options); decide per user-facing site
-  - narrow prepend patches need a version check and a spec that fails without them
-  - reproduce from CI's failing ids and separate environment failures by running them on the old version
-
-  Found on `active_interaction` 4.1 → 5.5 after a local "0 failures" run that CI contradicted with 166.
-- Added "Major bumps of a gem your code subclasses" to `references/gem-compatibility.md`:
-  - diff the gem's public/private method sets between versions, because a newly added private method can silently collide with subclass methods
-  - reproduce each break against both versions
-  - resolve the enclosing class for AST hits
-  - split both-version fixes into slices ahead of the bump
-  - guard silent failure modes with a spec in the bump PR
-
-  Found on `active_interaction` 4.1 → 5.5: its new private `Base#filter` disabled input validation in one interaction and raised on every call in another, and none of it was in the upgrade notes.
-- Boot smoke test (Step 4.6): added "Large apps: find every failure in one pass". It covers:
-  - `DEPENDENCIES_NEXT=1 bundle lock` writes to `Gemfile.lock` under bootboot 0.2.2; use `--lockfile=Gemfile_next.lock`.
-  - Getting past a known resolve blocker with a next-side-only pin, to find the rest.
-  - Loading every Zeitwerk constant and collecting failures (with a current-side baseline) instead of stopping at the first `eager_load!` error.
-  - App-level boot failures: version tripwires, deprecation subscribers raising on next-version deprecations, and Rails 8.0's `only:/except:` validation, with a collect-don't-raise route scan and a before/after route-dump proof.
-  - Booting dev, test and production on both sides.
-  - CI exporting `DEPENDENCIES_NEXT=0`, which is truthy.
-  - Splitting the fixes that work on both versions into a pre-work PR.
-
-  Found on kajabi-products' 7.2 → 8.0 smoke run: the whole bundle resolved with only the Rails gems, `rails-i18n` and `active_interaction` moving. 8 of 12,364 files failed to load, all `active_interaction` 5.
-- Rails 8.0 detection: added `ROUTES_INVALID_ONLY_EXCEPT` (breaking). 8.0 raises at route load when `resource(s)` `only:/except:` lists a non-RESTful action, which 7.2 ignored.
-- Added Step 3b to the detection workflow: grep for the app's own version gates (`Rails::VERSION` checks, `rails_7_2?`-style helpers). A strict-equality gate on the current version flips on the target; if its other branch calls `Rails.deprecator.warn` and the app raises on un-allow-listed deprecations, dev/test boot fails. Found on kajabi-products' counter-cache override (`unless AppConfig.rails_7_2?`).
-- Added "Gems your organization owns" to `references/gem-compatibility.md`: widening an owned gem's Rails ceiling isn't proof it works. Add a CI matrix of consumer Rails versions (`gemfiles/*` + `BUNDLE_GEMFILE`), seed matrix lockfiles from the main lockfile, and check which transitive majors the re-resolve pulled in. Found on `kj_notify`, whose CI ran only Rails 7.0 and hid a `connection_pool` 3.x `ArgumentError`.
-- Added a "Resolver dry-run and pre-load pass" to the gem compatibility workflow (Step 4.5). Railsbump and `bundle_report` check each gemspec against the target Rails but never show the resolved bundle, so they miss path gems and private-registry gems, and they can't say which transitive gems move. The new pass:
-  - resolves the whole bundle against the target in a scratch worktree (lock-only)
-  - classifies every moved gem as must-move-with-bump, pre-loadable (ship ahead at the latest version) or incidental (pin in the bump PR)
-  - checks each chosen version against the latest release and against repo release gates (supply-chain cooldown, license scan)
-  - covers default gems pinned below Ruby's bundled version, which can quietly keep APIs Ruby already removed
-
-  Found on kajabi-products' 7.2 → 8.0 hop:
-  - Resolving surfaced blockers railsbump reports as `skipped`: an in-repo engine gemspec and a private gem.
-  - Pre-loading moved 16 transitive gems out of the eventual bump PR.
-  - The resolver's picks included `rdoc` 8, which Rails 8.0 doesn't need and which failed both the 7-day cooldown and the license scan (`GPL-2.0-only`).
-- Added `references/proving-mechanical-refactors.md`, linked from Step 6. For mechanical fix-before-bump refactors, specs don't prove behavior is unchanged. The reference covers:
-  - a before/after dump of everything Rails generates from a declaration, including a write/read/SQL round trip for every value
-  - a mutation test proving the dump can fail
-  - a local end-to-end pass with the "stop allowing the old form" gate enabled
-  - a post-release stored-value query in production, focused on declarations whose key differs from the stored value
-
-  Used on kajabi-products' 183-site enum migration: 191 enums and 769 values dumped identical across 9 PRs, then stored values checked in prod after each release.
-- Step 6 "Deploy and verify" now requires confirming each fix-before-bump release reaches 100% of production and comparing errors before and after. Risky slices ship alone. It points to a rollout-monitoring skill when the repo has one.
-- Rails 8.0 detection: added `URI_ESCAPE_REMOVED` and `URI_DEFAULT_PARSER_REGEXP`. activesupport 8.0 adds `uri >= 0.13.1`, and apps pinning `uri ~> 0.10` lose `URI.escape` / `unescape` / `encode` / `decode` and the RFC 2396 regexps on the default parser. `URI_ESCAPE_REMOVED` searches `spec/` and `test/` as well: on kajabi-products, two spec files called these methods and only CI caught them. Added "Gem Resolution Notes" to the 7.2 → 8.0 guide:
-  - the `uri` fallout seen in gems (`dartsass-ruby`, `paypalhttp`)
-  - `rails-i18n` moving with the bump
-  - pinning incidental majors (`minitest` 6, `rdoc` 8)
-  - why Rack stays on 2.2
-  - the gems that can be pre-loaded on 7.2
-- Corrected the runtime check recommended for the Rails 8.0 enum migration. The previous wording suggested counting the enum deprecation during eager load, which misses every class loaded during boot: a subscriber installed from `rails runner` or an initializer starts too late. On kajabi-products it recorded 0 hits even with `user.rb` reverted to the keyword form, because User loads during boot. The guidance now requires the hook to be installed before Rails boots (e.g. a TracePoint on `ActiveRecord::Enum#enum` loaded via RUBYOPT) and to require non-eager-loaded files explicitly.
-- Fixed a 5x undercount in the Rails 8.0 enum detection (`rails-80-patterns.yml`). `ENUM_KWARGS` matched only the single-line keyword form (`enum status: {...}`), so it missed every parenthesized multi-line call (`enum(` on its own line, keyword hash and options below) — and its `search_paths` covered only `app/models/`, missing engine and `lib/` models. On kajabi-products it found 36 sites; the real total was 183 across 124 files. Added a companion `ENUM_KWARGS_MULTILINE` pattern and widened both to `app/`, `lib/`, `engines/`, taking the count to 190 (the extras are multi-line positional calls, flagged for review — over-reporting beats missing a boot failure). The explanation states plainly that line regexes cannot prove absence, and names the authoritative checks: a runtime count of the deprecation during eager load, and an AST scan, each covering what the other misses.
-- Documented the regex dialect the detection patterns require (`workflows/direct-detection-workflow.md`). About 150 pattern lines use Perl-style escapes (`\s`, `\b`, `\w`, `\d`) that ripgrep (and so the Grep tool) supports but POSIX ERE silently ignores — `git grep -E`, `grep -E` and BSD `grep` all run such a pattern without error and match nothing, reporting a false zero. Found running the skill against kajabi-products: the Rails 8.0 enum-keyword-arguments pattern, a hard boot failure at 8.0, returned 0 hits under `git grep -E` and 34 under `git grep -P`. The workflow now names the safe engines (Grep tool, `rg`, `git grep -P`), explains the branch-reading case that tempts a switch away from the Grep tool, and requires a known-positive sanity check before trusting any zero.
-- Added a large-monolith path to Step 1 (test suite). The step previously had only two modes: a full local suite run, or the no-test-suite smoke baseline. Neither fits a monolith whose suite is too large to run locally and whose contribution guide forbids it (kajabi-products is the motivating case). Step 1 now has a `5b` branch: honor the repo's own guidance, substitute the last green REQUIRED-workflow run on the base branch as the baseline, record which pipeline/run supplied it, run only the specs implicated by Step 4's findings locally, and record baseline confidence as `ci-verified` (between `partial` and a full local run). A RED base branch blocks the hop exactly as failing tests do.
-- Documented accumulated `load_defaults` debt in Step 7. The skill assumed defaults are aligned once per hop, so it had no guidance for an app several versions behind on defaults while sitting on a current Rails gem (kajabi-products: gem 7.2, `load_defaults 6.1`, three un-flipped `new_framework_defaults_*.rb` files). Added a detection recipe (check at Step 0, not Step 7; count active vs commented flags from the base branch rather than trusting a tracking ticket, whose counts go stale as flags land individually), a sequencing rule (accumulated debt does not block the version bump, but a part-flipped file should be finished before hopping), and a named list of flags that need individual handling because a green suite does not prove them safe: `cookies_serializer`, `key_generator_hash_digest_class` / `hash_digest_class`, `raise_on_open_redirects`, `partial_inserts`, `variant_processor`.
+- Gem compatibility workflow (Step 4.5): added a resolver dry-run and pre-load pass. Resolve the whole bundle against the target in a scratch worktree, classify each moved gem (must-move / pre-loadable / incidental), and check versions against latest and repo release gates. Catches path and private gems that railsbump skips.
+- `references/gem-compatibility.md`: added "Gems your organization owns" (CI matrix of consumer Rails versions) and "Major bumps of a gem your code subclasses" (method-set diff, two-version repro scripts, values the gem now compares or coerces).
+- Boot smoke test (Step 4.6): added "Large apps: find every failure in one pass" (bootboot `bundle lock` lockfile gotcha, next-side-only pins, Zeitwerk collect-don't-raise scan, app-level tripwires, all three environments, `DEPENDENCIES_NEXT=0` is truthy).
+- Detection workflow: added Step 3b (app-level Rails version gates) and a regex-dialect warning (POSIX ERE silently ignores `\s`/`\b`; use the Grep tool, `rg` or `git grep -P`, and sanity-check any zero).
+- Step 1: added a large-monolith path (`5b`) that uses the last green CI run on the base branch as the baseline.
+- Step 6: verify each fix-before-bump release at 100% of production; added `references/proving-mechanical-refactors.md`.
+- Step 7: added `references/load-defaults-debt.md` for apps whose `load_defaults` lags the installed Rails by more than one version.
+- Rails 8.0 detection: widened `ENUM_KWARGS` to `app/`, `lib/`, `engines/`; added `ENUM_KWARGS_MULTILINE`, `URI_ESCAPE_REMOVED`, `URI_DEFAULT_PARSER_REGEXP`, `ROUTES_INVALID_ONLY_EXCEPT`, with fixtures in `rails-80-patterns.expectations.yml`. Added gem resolution notes to the 7.2 → 8.0 guide.
 - Switched the assumed dual-boot mechanism from the `next_rails` gem to the [bootboot](https://github.com/Shopify/bootboot) Bundler plugin to match the upgrade workflow used at Kajabi (and other Shopify-style shops). Bootboot keeps a single `Gemfile` with conditional `if ENV["DEPENDENCIES_NEXT"] == "1"` blocks and maintains both `Gemfile.lock` and `Gemfile_next.lock` in sync. Application code that needs a runtime guard now uses `if ENV["DEPENDENCIES_NEXT"]` instead of `NextRails.next?`. The skill no longer delegates to a separate dual-boot skill — Step 2's bootboot setup is short enough to inline (`SKILL.md` → "CRITICAL: Dual-Boot Setup with bootboot"). Step 4.5 (gem compatibility) flips the primary check to railsbump.org and demotes `bundle_report compatibility` to an optional offline alternative (it requires the `next_rails` CLI, which bootboot users don't necessarily install). The `upgrade-cleanup` companion plugin's workflow and SKILL were rewritten to tear down the bootboot scaffolding (the plugin loader, the `enable_dual_booting` block, `Gemfile_next.lock`) and the `if ENV["DEPENDENCIES_NEXT"]` branches; a note covers cleaning up next_rails residue when migrating an existing campaign.
 - Fixed the bootboot setup sequence. The skill hand-writes the plugin loader and `enable_dual_booting` block (kajabi-products shape, with the Heroku guard), so it must not also run `bundle bootboot`, which appends a second copy of that block unconditionally. Step 2 now seeds `Gemfile_next.lock` with `cp` and runs `DEPENDENCIES_NEXT=1 bundle install`, which the previous flow omitted (bootboot only syncs a lockfile that already exists, and never installs next-side gems on a plain `bundle install`). Documented the env-var contract: set `DEPENDENCIES_NEXT=1` exactly, because bootboot selects the lockfile on truthiness while the Gemfile block compares to `"1"`.
 - `bin/validate-patterns` now accepts an optional `kind:` field on every pattern entry. Allowed values: `breaking`, `deprecation`, `migration`, `optional`. The validator rejects unknown values to guard against typos. The field is optional during the issue #53 rollout and becomes required once every pattern file has been classified. Documented the rubric in `CLAUDE.md` under "Assigning `kind:`".

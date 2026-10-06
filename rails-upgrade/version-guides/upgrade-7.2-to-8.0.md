@@ -327,18 +327,12 @@ Rails 8.0 includes Kamal configuration for deployment.
 
 ---
 
-## Gem Resolution Notes (from a real 7.2 → 8.0 upgrade)
+## Gem Resolution Notes
 
-These came from resolving a large app's bundle against Rails 8.0.5.1 (see "Resolver dry-run and pre-load pass" in `workflows/gem-compatibility-workflow.md`). They are specific to this hop.
-
-- **`uri >= 0.13.1` is a new activesupport 8.0 dependency.** An app pinning `uri ~> 0.10` can't resolve, and moving the pin removes `URI.escape` / `unescape` / `encode` / `decode` and changes `URI::DEFAULT_PARSER` to the RFC 3986 parser. Patterns `URI_ESCAPE_REMOVED` and `URI_DEFAULT_PARSER_REGEXP` cover app code. Gem fallout seen in practice:
-  - `dartsass-ruby` 3.0.x fails to load (`URI::Parser.new(hash)`). Fix: `dartsass-sprockets >= 3.1`, which switches to `sassc-embedded`, plus any fork that hard-requires `dartsass-ruby`.
-  - `paypalhttp` 1.0.1 form-encodes with `URI.escape`. `paypal-checkout-sdk` pins `paypalhttp ~> 1.0.1`, and the Checkout SDK line is deprecated in favor of `paypal-server-sdk`, so patch the encoder until that migration happens.
-- **`rails-i18n` 8.x requires `railties >= 8.0`**, so it moves in the bump PR itself, not ahead of it.
-- **Keep incidental majors out of the bump.** The resolver moves `minitest` 5 → 6 and `rdoc` → 8.x when Rails is unlocked, but Rails 8.0 requires neither (railties 8 needs `irb ~> 1.13`, and `irb` accepts `rdoc >= 4.0.0`). Pin both at their current majors in the bump PR. `rdoc` 8.x also declares `GPL-2.0-only` alongside `Ruby`, which license scanners flag.
-- **Rack stays on 2.2.** Rails 8.0 supports Rack 2.2, and in a bundle with `sprockets` 3.x, `omniauth` 2.0, `rack-session` 1.x, `rackup` 1.x or `rack-protection` 2.x, Rack 3 won't resolve. Rack 3 is a separate project, not part of this hop.
-- **Pre-loadable on 7.2** (they resolve on 7.2 to their 8.0 versions): `sprockets-rails` 3.5.x, `tilt` 2.9.x, `i18n` 1.15.x, `reline` 0.7.x, `io-console` 0.9.x, and a patch-level batch (`rack` 2.2.x, `loofah`, `rails-html-sanitizer`, `mail`, `net-imap`, `net-protocol`, `crass`, `cgi`, `pp`, `zeitwerk`). `i18n` 1.15.0 makes config storage (including `I18n.locale`) Fiber-aware, so watch locale behavior after it ships.
-- **Check path and private gems by resolving, not with railsbump.** In-repo engines' gemspecs, and privately hosted gems with `rails < 8.0.0` caps, only show up as resolution failures.
+- **`uri >= 0.13.1` is a new activesupport 8.0 dependency.** An app pinning `uri ~> 0.10` won't resolve, and moving the pin removes `URI.escape` / `unescape` / `encode` / `decode` and makes `URI::DEFAULT_PARSER` the RFC 3986 parser. Patterns `URI_ESCAPE_REMOVED` and `URI_DEFAULT_PARSER_REGEXP` cover app code; gems that call these at load time only show up when the app boots on the moved pin.
+- **`rails-i18n` 8.x requires `railties >= 8.0`**, so it moves in the bump PR.
+- **Pin incidental majors.** Unlocking Rails lets the resolver move `minitest` to 6 and `rdoc` to 8, which Rails 8.0 doesn't require. Pin them at their current majors in the bump PR.
+- **Rack can stay on 2.2.** Rails 8.0 supports it, and Rack 3 often won't resolve alongside older `sprockets`, `omniauth` or `rack-protection`. Treat Rack 3 as its own project.
 
 ## Solid Gems Decision Guide
 
