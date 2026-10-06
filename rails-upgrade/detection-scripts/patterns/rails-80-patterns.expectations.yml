@@ -12,32 +12,8 @@ ENUM_KWARGS:
   no_match:
     - "  enum :status, { active: 0, archived: 1 }, prefix: true"
 
-ENUM_KWARGS_MULTILINE:
-  match:
-    - "  enum("
-    - "  enum(status: { active: 0, archived: 1 },"
-  no_match:
-    - "  enum(:status, { active: 0, archived: 1 }, prefix: true)"
-    - "  enum :status, { active: 0 }"
-
-URI_ESCAPE_REMOVED:
-  match:
-    - "    URI.escape(value)"
-    - "    URI::decode(param)"
-  no_match:
-    - "    URI::RFC2396_PARSER.escape(value)"
-    - "    Addressable::URI.escape(value)"
-    - "    CGI.escape(value)"
-
 URI_DEFAULT_PARSER_REGEXP:
   match:
     - "    url.match?(URI::DEFAULT_PARSER.regexp[:ABS_URI])"
   no_match:
     - "    url.match?(URI::RFC2396_PARSER.regexp[:ABS_URI])"
-
-ROUTES_INVALID_ONLY_EXCEPT:
-  match:
-    - "  resources :offers, only: [:index, :show, :duplicate]"
-    - "  resource :settings, except: :destroy"
-  no_match:
-    - "  resources :offers do"

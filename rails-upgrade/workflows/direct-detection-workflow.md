@@ -124,16 +124,18 @@ Grep:
 
 Same process for `upgrade_findings.medium_priority` and `upgrade_findings.low_priority` patterns.
 
-### Step 3b: App-level version gates (not in any pattern file)
+### Step 3b: Checks the pattern files can't do
 
-Apps wrap patches and backports in their own version checks. Grep for them and read every hit:
+**App-level version gates.** Grep and read every hit:
 
 ```
 grep -rnE 'Rails::VERSION::(MAJOR|MINOR|STRING)|Rails\.(version|gem_version)|rails_[0-9]+_[0-9]+\?' app lib config --include='*.rb'
 ```
 
-- **Strict-equality gates on the current version** (`== 7.2`, `unless rails_7_2?`) flip on the target. If the other branch warns and the app raises on un-allow-listed deprecations, dev/test boot fails. Widen the gate after checking the guarded code against the target.
-- **Gates for versions the app no longer runs** are dead code; remove them in the pre-work.
+- Strict-equality gates on the current version (`== 7.2`, `unless rails_7_2?`) flip on the target. Check the other branch against the target, then widen the gate.
+- Gates for versions the app no longer runs: remove them in the pre-work.
+
+**Linters that only see changed files.** If CI or git hooks run RuboCop on the diff only, legacy code is never checked. Run any cop that targets an API the hop removes over the whole repo (e.g. `rubocop --only Lint/UriEscapeUnescape`).
 
 ---
 
@@ -237,11 +239,9 @@ Run the search, then filter results in analysis.
 **Search multiple paths:**
 Make separate Grep calls for each path, or use a parent directory.
 
-### ⚠️ Regex dialect — a wrong engine reports false zeros
+### ⚠️ Regex dialect
 
-Pattern files use Perl-style escapes (`\s`, `\b`, `\w`, `\d`). The Grep tool (ripgrep) supports them. POSIX ERE (`git grep -E`, `grep -E`) silently ignores them and matches nothing, and BSD `grep` has no `-P`. Use the Grep tool, `rg`, or `git grep -P` (e.g. when reading a branch you haven't checked out).
-
-**Before trusting any zero, run one pattern you know matches** (e.g. `^\s*class\s+\w+` over `app/models`). If it returns nothing, every zero in the run is suspect. Record which engine produced the results.
+Pattern files use Perl-style escapes (`\s`, `\b`, `\w`, `\d`). Use the Grep tool, `rg`, or `git grep -P`. Never `grep -E` / `git grep -E` (they ignore the escapes and return zero) or BSD `grep`. Before trusting any zero, run a pattern you know matches (e.g. `^\s*class\s+\w+` over `app/models`).
 
 ### Using Glob to Find Files
 

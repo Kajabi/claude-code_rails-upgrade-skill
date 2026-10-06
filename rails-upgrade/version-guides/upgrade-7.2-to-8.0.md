@@ -329,10 +329,9 @@ Rails 8.0 includes Kamal configuration for deployment.
 
 ## Gem Resolution Notes
 
-- **`uri >= 0.13.1` is a new activesupport 8.0 dependency.** An app pinning `uri ~> 0.10` won't resolve, and moving the pin removes `URI.escape` / `unescape` / `encode` / `decode` and makes `URI::DEFAULT_PARSER` the RFC 3986 parser. Patterns `URI_ESCAPE_REMOVED` and `URI_DEFAULT_PARSER_REGEXP` cover app code; gems that call these at load time only show up when the app boots on the moved pin.
-- **`rails-i18n` 8.x requires `railties >= 8.0`**, so it moves in the bump PR.
-- **Pin incidental majors.** Unlocking Rails lets the resolver move `minitest` to 6 and `rdoc` to 8, which Rails 8.0 doesn't require. Pin them at their current majors in the bump PR.
-- **Rack can stay on 2.2.** Rails 8.0 supports it, and Rack 3 often won't resolve alongside older `sprockets`, `omniauth` or `rack-protection`. Treat Rack 3 as its own project.
+- **`uri >= 0.13.1` is a new activesupport 8.0 dependency.** Moving off a `uri ~> 0.10` pin removes `URI.escape` / `unescape` / `encode` / `decode` and makes `URI::DEFAULT_PARSER` the RFC 3986 parser. Find the removed calls with `rubocop --only Lint/UriEscapeUnescape` over the whole repo (not just changed files); `URI_DEFAULT_PARSER_REGEXP` covers the parser change. Boot and run the suite on the moved pin to catch gems that call them.
+- **Pin incidental majors.** Unlocking Rails lets the resolver move `minitest` to 6 and `rdoc` to 8; Rails 8.0 requires neither. Pin them at their current majors in the bump PR.
+- **Keep Rack on 2.2.** Rails 8.0 supports it, and Rack 3 often won't resolve alongside older `sprockets`, `omniauth` or `rack-protection`. Treat Rack 3 as its own project.
 
 ## Solid Gems Decision Guide
 

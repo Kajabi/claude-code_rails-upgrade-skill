@@ -76,41 +76,35 @@ Repeat steps 1–3 until boot succeeds under `DEPENDENCIES_NEXT=1`. Then proceed
 
 ## Large apps: find every failure in one pass
 
-Boot-fix-reboot finds one failure per boot. On a large app, collect them all instead:
+Boot-fix-reboot finds one failure per boot. On a large app, collect them all:
 
-**Resolve into the right lockfile.** Under bootboot, `DEPENDENCIES_NEXT=1 bundle lock` writes to `Gemfile.lock`. Use `--lockfile=Gemfile_next.lock` (or `bundle install`) and confirm `git diff --stat Gemfile.lock` is empty.
+1. **Lock into the right file.** Under bootboot, `DEPENDENCIES_NEXT=1 bundle lock` writes `Gemfile.lock`. Use `--lockfile=Gemfile_next.lock` (or `bundle install`); confirm `git diff --stat Gemfile.lock` is empty.
+2. **Get past known resolve blockers.** Give the next side alone the newer version (`if ENV["DEPENDENCIES_NEXT"] == "1"` pin) and re-resolve until it resolves.
+3. **Load every constant and collect failures** instead of stopping at the first `eager_load!` error:
 
-**Get past a known resolve blocker.** Give the next side alone the newer version (`if ENV["DEPENDENCIES_NEXT"] == "1"` pin) and re-resolve until the bundle resolves. Then diff the two lockfiles: every moved gem is must-move-with-bump or already ticketed.
+   ```ruby
+   # DEPENDENCIES_NEXT=1 RAILS_ENV=test bin/rails runner scan.rb
+   errors = Hash.new { |h, k| h[k] = [] }
+   Rails.autoloaders.each do |loader|
+     loader.all_expected_cpaths.each do |path, cpath|
+       next unless path.end_with?(".rb")
+       Object.const_get(cpath)
+     rescue Exception => e
+       frame = e.backtrace&.find { |l| l.start_with?(Rails.root.to_s) }
+       errors["#{e.class}: #{e.message.lines.first.strip[0, 160]}"] << "#{path} @ #{frame}"
+     end
+   end
+   errors.sort_by { |_, v| -v.size }.each { |k, v| puts "[#{v.size}] #{k}", v.first(4).map { "   #{_1}" } }
+   ```
 
-**Load every constant and collect failures.** `eager_load!` stops at the first bad file. Walk Zeitwerk's expected constants instead:
-
-```ruby
-# DEPENDENCIES_NEXT=1 RAILS_ENV=test bin/rails runner scan.rb
-errors = Hash.new { |h, k| h[k] = [] }
-Rails.autoloaders.each do |loader|
-  loader.all_expected_cpaths.each do |path, cpath|
-    next unless path.end_with?(".rb")
-    Object.const_get(cpath)
-  rescue Exception => e
-    frame = e.backtrace&.find { |l| l.start_with?(Rails.root.to_s) }
-    errors["#{e.class}: #{e.message.lines.first.strip[0, 160]}"] << "#{path} @ #{frame}"
-  end
-end
-errors.sort_by { |_, v| -v.size }.each { |k, v| puts "[#{v.size}] #{k}", v.first(4).map { "   #{_1}" } }
-```
-
-Run the same scan on the current side and report only the difference.
-
-**Expect app-level failures, not only gem ones:**
-- Version tripwires from the previous hop (`raise ... unless Rails.version < "8.0"`). Replace them with a guard that works on both versions.
-- Deprecation subscribers that raise in dev/test. The target Rails warns about the version after it; allow-list those warnings (they belong to the next hop).
-- Framework validations the target adds at boot (check the version guide). When the error names only the first offender, temporarily patch the validating method to log and continue, so one boot lists them all.
-
-**Boot all three environments.** Production eager-loads during boot. Boot development, test and production on both sides; only the differences count.
-
-**Check how CI sets the variable.** A CI default of `DEPENDENCIES_NEXT=0` is truthy to bootboot and to `if ENV["DEPENDENCIES_NEXT"]` guards. Make sure guards compare to `"1"`, or default CI silently runs the next lockfile.
-
-**Split the work.** Fixes that behave the same on both versions go in a pre-work PR; the `Gemfile_next` PR stays `Gemfile` + `Gemfile_next.lock`.
+   Run it on the current side too and report only the difference. It catches every class-load failure (e.g. removed declaration syntax) in autoloaded files; require non-autoloaded files (`lib/`, separately loaded engines) explicitly.
+4. **Fix app-level boot failures:**
+   - Version tripwires from the previous hop (`raise ... unless Rails.version < "X"`): replace with a guard that works on both versions.
+   - Deprecation subscribers that raise in dev/test: allow-list the target's warnings about the version after it (they belong to the next hop).
+   - Framework validations that name only the first offender (e.g. routes): temporarily patch the validating method to log and continue, so one boot lists them all.
+5. **Boot development, test and production on both sides.** Production eager-loads at boot. Only differences count.
+6. **Check how CI sets the variable.** `DEPENDENCIES_NEXT=0` is truthy to bootboot and to `if ENV["DEPENDENCIES_NEXT"]`. Make guards compare to `"1"`.
+7. **Split the work.** Fixes that behave the same on both versions go in a pre-work PR; the `Gemfile_next` PR stays `Gemfile` + `Gemfile_next.lock`.
 
 ## Output
 

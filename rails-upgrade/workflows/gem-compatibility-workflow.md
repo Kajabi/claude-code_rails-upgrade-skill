@@ -197,49 +197,45 @@ When the agent later runs the actual `bundle update`, prefer one gem at a time (
 
 ## Resolver dry-run and pre-load pass
 
-Railsbump and `bundle_report` answer "does each gem's gemspec accept the target Rails?". They do not show what the **whole bundle** looks like once it resolves against the target: which transitive gems move, which blockers are invisible to them (path gems, private-registry gems), or what the resolver pulls in that the target doesn't actually need. A lock-only dry run answers all three. Run it after the checks above and before writing the Step 5 report. Repeat it after each round of fix-before-bump work lands, because the base branch moves.
+Run after the checks above and before the Step 5 report. Re-run after each round of fix-before-bump work lands. It finds blockers railsbump skips (path gems, private gems) and shows every transitive gem that moves.
 
 ### 1. Resolve against the target in a scratch copy
-
-Use a throwaway worktree of the base branch. Nothing is installed or committed.
 
 ```sh
 git worktree add --detach /tmp/rails-next-resolve origin/main
 cd /tmp/rails-next-resolve
-# Pin the target Rails in the Gemfile, plus any fixes already in flight on open PRs
+# Set the target Rails in the Gemfile, plus fixes already in flight
 bundle lock --update rails <gems-with-in-flight-changes>
 ```
 
-Each failure names one blocker (`Because Gemfile depends on X ~> A and rails ~> B ... version solving has failed`). Relax that constraint in the scratch Gemfile, record it as a blocker, and re-run until the bundle resolves. This loop is the only check that sees path gems (in-repo engines) and private-registry gems, which railsbump reports as `skipped`.
+For each failure (`Because Gemfile depends on X ~> A and rails ~> B ...`): record X as a blocker, relax its constraint in the scratch Gemfile, re-run. Repeat until the bundle resolves. Nothing is installed or committed.
 
 ### 2. Classify every gem that moved
 
-Diff the scratch `Gemfile.lock` against the base branch's lockfile, then sort each moved gem into one bucket:
+Diff the scratch lockfile against the base lockfile and bucket each moved gem:
 
 | Bucket | Test | Action |
 |---|---|---|
-| **Must move with the bump** | The target Rails requires it, and it doesn't resolve on the current Rails (e.g. a gem requiring `railties >= <target>`). | Ship in the Rails bump PR. |
-| **Pre-loadable** | `bundle lock --update <gem>` on the **current** base branch reaches the same version. | Ship ahead of the hop in small grouped PRs (asset pipeline, i18n, console tooling, a patch-level batch). This shrinks the bump PR to Rails itself. |
-| **Incidental** | The resolver moved it only because it was unlocked. Nothing in the target Rails requires the new version: trace the requirement chain through `railties` / `activesupport` / their dependencies. | Pin it at its current major in the bump PR, so an unrelated major upgrade (a new test framework major, a new doc tool major) doesn't ride along. |
+| **Must move with the bump** | Required by the target Rails and doesn't resolve on the current one | Bump PR |
+| **Pre-loadable** | `bundle lock --update <gem> --conservative` on the base branch reaches the same version | Small PRs ahead of the hop |
+| **Incidental** | Nothing in the target's requirement chain needs the new version | Pin at its current major in the bump PR |
 
-Test pre-loadability one gem at a time from a fresh copy of the base lockfile. `bundle update` without `--conservative` also unlocks the gem's dependencies and folds unrelated bumps into the same PR.
+Test pre-loadability one gem at a time from a fresh base lockfile.
 
-### 3. Check the version, not only the resolution
+### 3. Check each chosen version
 
-Before committing to a version, confirm:
+- Latest release? If not, record what holds it back.
+- Passes the repo's release gates (minimum release age, license scan)?
+- Adds a runtime dependency or native extension? Name it in the PR.
 
-- **It's the latest release, or explain why not.** Compare against RubyGems `versions/<gem>/latest.json`. When it isn't the latest, find what holds it back and record it (e.g. a major bump of a web-server interface held back by an old asset pipeline). That usually belongs to a separate project, not this hop.
-- **The repo's release gates pass.** If the repo enforces a supply-chain cooldown (minimum release age) or a license scan, check the new versions against them first. A version published days ago, or one that newly declares a stricter license, fails CI on an otherwise-correct PR. Prefer the newest version that clears the gates, or leave the gem out if the target doesn't require it.
-- **New transitive dependencies.** A bump can add a new runtime dependency, sometimes a native extension that has to build in CI and in the production image. Name it in the PR.
+### 4. Default gems pinned below Ruby's version
 
-### 4. Pinned default/bundled gems
+If the Gemfile pins a default/bundled gem below the version Ruby ships, and the target raises its floor:
 
-A gem that ships with Ruby (a default or bundled gem) but is pinned in the Gemfile *below* the version Ruby itself ships can quietly keep APIs that Ruby already removed. The app, and its gems, keep calling them, and nothing warns until the pin moves. When the target Rails raises the floor on such a gem:
-
-1. Compare the locked version to what the current Ruby ships (`Gem::Specification.find_all_by_name(<gem>).select(&:default_gem?)`).
-2. Test each API the codebase and bundled gems call against the old version, Ruby's version and the latest. A short probe script run against each installed version shows exactly which calls change behavior or disappear.
-3. Grep for every call form: with and without parentheses, `::` as well as `.`, across app code, `lib/`, engines, views **and specs**. Specs call removed APIs too, and a grep limited to `app/` misses them.
-4. Treat a full CI run on the moved pin as part of the detection. It is the only reliable way to find gems that call the removed API at load time; those fail to boot, and grep can't see into them.
+1. Compare the locked version to Ruby's (`Gem::Specification.find_all_by_name(<gem>).select(&:default_gem?)`).
+2. Probe each API the app calls against the old version, Ruby's and the latest.
+3. Search every call form across app code, `lib/`, engines, views and specs.
+4. Boot and run CI on the moved pin; gems that call removed APIs at load time only show up there.
 
 ---
 

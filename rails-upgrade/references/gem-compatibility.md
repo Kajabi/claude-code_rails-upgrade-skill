@@ -48,21 +48,21 @@ If `bundle_report` flags one of these, check the target version guide before ass
 
 ## Gems your organization owns
 
-A private gem that caps Rails (`rails < 8.0`) is a blocker only you can clear. Widening the gemspec ceiling unblocks the resolver but doesn't show the gem works on the target:
+Widening a private gem's Rails ceiling unblocks the resolver; it doesn't prove the gem works. Before relying on the widened release:
 
-- **Check which Rails its CI runs.** Gem CI often tests only the Rails in the gem's own `Gemfile.lock`, which can lag every consumer.
-- **Add a matrix of consumer versions.** One `gemfiles/rails_X_Y.gemfile` per version that sets the Rails requirement and `eval_gemfile`s the main Gemfile, selected in CI with `BUNDLE_GEMFILE`. Seed each matrix lockfile from the main one (`cp`, then `bundle lock --update rails <test gems>`) so `git:` dependencies keep their locked revisions.
-- **Read what the re-resolve pulled in.** Unpinned transitive gems can jump a major and expose latent bugs (e.g. `connection_pool` 3.x accepts only keyword arguments). Fix those in the gem before a consumer lifts its pin.
+1. Check which Rails the gem's CI runs (often only its own lockfile's, behind every consumer).
+2. Add a matrix of consumer versions: one `gemfiles/rails_X_Y.gemfile` per version that sets the Rails requirement and `eval_gemfile`s the main Gemfile, selected with `BUNDLE_GEMFILE`. Seed each lockfile from the main one (`cp`, then `bundle lock --update rails <test gems>`).
+3. Read what the re-resolve moved. Fix transitive major jumps (e.g. a pool or HTTP gem going keyword-only) in the gem before consumers lift their pin.
 
 ---
 
 ## Major bumps of a gem your code subclasses
 
-When the only compatible version is a new major and the app subclasses the gem's classes (service-object bases, form objects, interactors), the changelog's upgrade notes are not enough:
+When the only compatible version is a new major and the app subclasses its classes:
 
-- **Diff the API surface.** Install each version into a temp dir and diff `public_instance_methods` and `private_instance_methods` (minus `Object`'s) on the base classes and any value objects the app touches. Removed methods are call sites to fix. **Added private methods are collision risks:** a subclass method with the same name silently replaces the framework step.
-- **Reproduce each break in a short script against both versions**, to see which breaks raise and which silently change behavior.
-- **Resolve the enclosing class before counting a hit.** Name-based scans over-count; walk the AST and record the class stack for each match.
-- **Check what the gem now does to the values you pass it.** Grep the new version for comparisons and coercions on caller-supplied values (`== nil`, `==`, `===`, `to_s`, `present?`). `value == nil` dispatches to the value's own `#==`: an `ActiveRecord::AssociationRelation` or `CollectionProxy` loads every row, and an app `#==` that assumes the same class can raise on nil. Also check nil handling of required inputs and the shape of error output (keys, paths, messages) wherever it reaches users or API clients.
-- **Split by what works on both versions.** Ship those changes as slices ahead of the bump; keep changes that need the new API on one side with the bump.
-- **Guard silent failure modes with a spec** in the bump PR (e.g. "no subclass overrides the framework's private step"). If a gem behavior can only be fixed with a prepend patch, give it a version check that warns when the gem version changes and a spec that fails without it.
+1. **Diff the API surface.** Install both versions to a temp dir; diff `public_instance_methods` and `private_instance_methods` (minus `Object`'s) on the base classes and value objects the app uses. Removed methods are call sites to fix. Added private methods can be silently overridden by a subclass method of the same name; grep the app for each.
+2. **Reproduce each break in a short script against both versions** to see which raise and which change behavior silently.
+3. **Resolve the enclosing class for every hit** (walk the AST); name-only scans over-count.
+4. **Check what the gem now does with caller values.** Grep the new version for `== nil`, `==`, `===`, `to_s`, `present?` on inputs. `value == nil` calls the value's `#==`: an `AssociationRelation` or `CollectionProxy` loads every row, and an app `#==` that assumes the same class can raise. Also check nil handling of required inputs and the shape of error output that reaches users or APIs.
+5. **Ship both-version changes as slices ahead of the bump**; keep one-version changes in the bump PR.
+6. **Add a spec for each silent failure mode.** A prepend patch for gem behavior needs a version check that warns on any gem version change and a spec that fails without it.
