@@ -19,10 +19,25 @@ upgrade_findings:
       pattern: "^\\s*enum\\s+\\w+:\\s*"
       exclude: ""
       search_paths:
-        - "app/models/"
-      explanation: "Rails 8.0 removes the keyword-arguments form of enum (`enum status: { ... }, _prefix: true`). The 7.0 / 7.1 hash form (`enum :status, { ... }, prefix: true`) is now the only supported syntax. activerecord/CHANGELOG.md: 'Remove deprecated support for defining `enum` with keyword arguments.' Models still using the old form raise ArgumentError on class load — the app fails to boot"
+        - "app/"
+        - "lib/"
+        - "engines/"
+      explanation: "Rails 8.0 removes the keyword-arguments form of enum (`enum status: { ... }, _prefix: true`). The 7.0 / 7.1 hash form (`enum :status, { ... }, prefix: true`) is now the only supported syntax. activerecord/CHANGELOG.md: 'Remove deprecated support for defining `enum` with keyword arguments.' Models still using the old form raise ArgumentError on class load — the app fails to boot. This regex sees only the single-line form; the Step 4.6 constant-loading scan catches multi-line calls"
       fix: "Convert to the explicit form: `enum :status, { active: 0, archived: 1 }, prefix: true`. Mechanical migration; no runtime behavior change once converted"
       variable_name: "ENUM_KWARGS"
+
+    - name: "URI::DEFAULT_PARSER.regexp (RFC 2396 regexps gone from the default parser)"
+      kind: "breaking"
+      pattern: "DEFAULT_PARSER\\.regexp"
+      exclude: ""
+      search_paths:
+        - "app/"
+        - "lib/"
+        - "config/"
+        - "engines/"
+      explanation: "In uri >= 1.0, URI::DEFAULT_PARSER is the RFC 3986 parser. Its `regexp` hash has no :ABS_URI (and other RFC 2396 keys), so `DEFAULT_PARSER.regexp[:ABS_URI]` returns nil and `match?(nil)` raises TypeError. Also check `URI::Parser.new(...)` with arguments: on 1.x it takes none, and gems that call it at load time stop the app from booting. DEFAULT_PARSER.escape / unescape and URI.extract still work on 1.x"
+      fix: "Use URI::RFC2396_PARSER.regexp[:ABS_URI] (defined on uri >= 0.13). For gems calling URI::Parser.new(hash), upgrade to a release that doesn't"
+      variable_name: "URI_DEFAULT_PARSER_REGEXP"
 
     - name: "assume_ssl configuration"
       kind: "optional"

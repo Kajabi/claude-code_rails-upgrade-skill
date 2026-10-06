@@ -252,6 +252,8 @@ If user requests a multi-hop upgrade (e.g., 5.2 → 8.1):
 - `references/multi-hop-strategy.md` - Multi-version planning
 - `references/testing-checklist.md` - Comprehensive testing
 - `references/gem-compatibility.md` - Gem update order and the "no compatible version" playbook (fork / vendor / replace). Load only when Step 4.5's compatibility check produced blockers.
+- `references/proving-mechanical-refactors.md` - Before/after artifact dump, mutation test and post-release check for mechanical refactors. Load in Step 6 when a fix spans many call sites.
+- `references/load-defaults-debt.md` - Apps several versions behind on `load_defaults`: measuring the debt, sequencing, and flags that need individual handling. Load at Step 0 / Step 7 when it applies.
 - `references/js-compressor-sprockets-mismatch.md` - Keeping terser / closure-compiler working when the target Rails pins Sprockets to the 2.x line. Load only when JS_COMPRESSOR_GEM_MISMATCH fires.
 
 ### Detection Pattern Resources
@@ -300,6 +302,11 @@ When user requests an upgrade, follow this workflow:
    - Run the safe read-only smoke baseline: Rails boot, test-env boot when possible, routes load, migration status, and asset/build command if present
    - Record baseline confidence as partial
    - Continue only if boot/routes checks pass and the user accepts the risk of proceeding without real tests
+5b. If the suite is too large to run locally (or the repo's contribution guide forbids it):
+   - Use the last completed run of the REQUIRED CI workflow on the base branch as the baseline; record provider, run, SHA and time
+   - Locally, run only the specs implicated by Step 4's findings
+   - Record baseline confidence as ci-verified (between partial and a full local run)
+   - A RED base branch blocks the hop exactly like failing tests (step 6)
 6. If ANY tests fail:
    - STOP the upgrade process
    - Report failing tests to user
@@ -374,6 +381,9 @@ Determines which gems must be bumped before the Rails version change can resolve
 3. If any blockers exist, load references/gem-compatibility.md for
    the fork/replace/vendor playbook and the gem update order. Skip
    otherwise.
+4. Run the "Resolver dry-run and pre-load pass" in the same workflow. It is
+   the only check that sees path and private gems, and it moves pre-loadable
+   gems out of the bump PR. Re-run it as fix-before-bump work lands.
 ```
 
 ### Step 4.6: Boot Smoke Test on the Next Dependency Set
@@ -434,8 +444,10 @@ instead of mid-implementation.
 4. Update the Gemfile's next-side conditional to the target Rails version (and any required gem bumps), then run `bundle install` so both Gemfile.lock and Gemfile_next.lock update
 5. Run test suite against both versions (`bundle exec rspec` and `DEPENDENCIES_NEXT=1 bundle exec rspec`)
 6. **Check CI config matches the upgraded Gemfile** — load `workflows/ci-sync-workflow.md`, fix any mismatches before proceeding
-7. Deploy and verify
+7. Deploy and verify. Confirm each fix-before-bump release reaches 100% of production and compare errors before and after (use the repo's rollout-monitoring skill if it has one). Ship risky slices alone.
 ```
+
+For mechanical refactors that span many call sites, load `references/proving-mechanical-refactors.md`: specs alone don't prove behavior is unchanged.
 
 **Do not fix `load_defaults`-triggered runtime deprecation warnings about *future* Rails versions during this hop.** This caveat covers post-bump runtime warnings emitted by Rails X+1 about behavior scheduled to change in X+2 — typically surfaced once `load_defaults X.Y` flips on in Step 7. Those belong to the *next* upgrade cycle and are addressed before the next version bump.
 
@@ -452,6 +464,8 @@ Triaging tomorrow's deprecation warnings now expands the scope of the current ho
 3. Tests are re-run between each change
 4. Consolidates into config/application.rb when done
 ```
+
+**If `load_defaults` lags the installed Rails by more than one version** (several `new_framework_defaults_*.rb` files), load `references/load-defaults-debt.md`. Check this at Step 0: it changes how much pre-work the hop carries.
 
 ### Step 8: Mention Cleanup (USER-TRIGGERED)
 ```

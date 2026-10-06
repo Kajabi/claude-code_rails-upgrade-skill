@@ -74,6 +74,38 @@ For each offending gem:
 
 Repeat steps 1–3 until boot succeeds under `DEPENDENCIES_NEXT=1`. Then proceed to Step 5.
 
+## Large apps: find every failure in one pass
+
+Boot-fix-reboot finds one failure per boot. On a large app, collect them all:
+
+1. **Lock into the right file.** Under bootboot, `DEPENDENCIES_NEXT=1 bundle lock` writes `Gemfile.lock`. Use `--lockfile=Gemfile_next.lock` (or `bundle install`); confirm `git diff --stat Gemfile.lock` is empty.
+2. **Get past known resolve blockers.** Give the next side alone the newer version (`if ENV["DEPENDENCIES_NEXT"] == "1"` pin) and re-resolve until it resolves.
+3. **Load every constant and collect failures** instead of stopping at the first `eager_load!` error:
+
+   ```ruby
+   # DEPENDENCIES_NEXT=1 RAILS_ENV=test bin/rails runner scan.rb
+   errors = Hash.new { |h, k| h[k] = [] }
+   Rails.autoloaders.each do |loader|
+     loader.all_expected_cpaths.each do |path, cpath|
+       next unless path.end_with?(".rb")
+       Object.const_get(cpath)
+     rescue Exception => e
+       frame = e.backtrace&.find { |l| l.start_with?(Rails.root.to_s) }
+       errors["#{e.class}: #{e.message.lines.first.strip[0, 160]}"] << "#{path} @ #{frame}"
+     end
+   end
+   errors.sort_by { |_, v| -v.size }.each { |k, v| puts "[#{v.size}] #{k}", v.first(4).map { "   #{_1}" } }
+   ```
+
+   Run it on the current side too and report only the difference. It catches every class-load failure (e.g. removed declaration syntax) in autoloaded files; require non-autoloaded files (`lib/`, separately loaded engines) explicitly.
+4. **Fix app-level boot failures:**
+   - Version tripwires from the previous hop (`raise ... unless Rails.version < "X"`): replace with a guard that works on both versions.
+   - Deprecation subscribers that raise in dev/test: allow-list the target's warnings about the version after it (they belong to the next hop).
+   - Framework validations that name only the first offender (e.g. routes): temporarily patch the validating method to log and continue, so one boot lists them all.
+5. **Boot development, test and production on both sides.** Production eager-loads at boot. Only differences count.
+6. **Check how CI sets the variable.** `DEPENDENCIES_NEXT=0` is truthy to bootboot and to `if ENV["DEPENDENCIES_NEXT"]`. Make guards compare to `"1"`.
+7. **Split the work.** Fixes that behave the same on both versions go in a pre-work PR; the `Gemfile_next` PR stays `Gemfile` + `Gemfile_next.lock`.
+
 ## Output
 
 A short report block to merge into Step 5's Comprehensive Upgrade Report:
