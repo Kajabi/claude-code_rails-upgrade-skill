@@ -327,6 +327,12 @@ Rails 8.0 includes Kamal configuration for deployment.
 
 ---
 
+## Gem Resolution Notes
+
+- **`uri >= 0.13.1` is a new activesupport 8.0 dependency.** Moving off a `uri ~> 0.10` pin removes `URI.escape` / `unescape` / `encode` / `decode` and makes `URI::DEFAULT_PARSER` the RFC 3986 parser. Find the removed calls with `rubocop --only Lint/UriEscapeUnescape` over the whole repo (not just changed files); `URI_DEFAULT_PARSER_REGEXP` covers the parser change. Boot and run the suite on the moved pin to catch gems that call them.
+- **Pin incidental majors.** Unlocking Rails lets the resolver move `minitest` to 6 and `rdoc` to 8; Rails 8.0 requires neither. Pin them at their current majors in the bump PR.
+- **Keep Rack on 2.2.** Rails 8.0 supports it, and Rack 3 often won't resolve alongside older `sprockets`, `omniauth` or `rack-protection`. Treat Rack 3 as its own project.
+
 ## Solid Gems Decision Guide
 
 | Current Setup | Recommendation |

@@ -195,6 +195,50 @@ When the agent later runs the actual `bundle update`, prefer one gem at a time (
 
 ---
 
+## Resolver dry-run and pre-load pass
+
+Run after the checks above and before the Step 5 report. Re-run after each round of fix-before-bump work lands. It finds blockers railsbump skips (path gems, private gems) and shows every transitive gem that moves.
+
+### 1. Resolve against the target in a scratch copy
+
+```sh
+git worktree add --detach /tmp/rails-next-resolve origin/main
+cd /tmp/rails-next-resolve
+# Set the target Rails in the Gemfile, plus fixes already in flight
+bundle lock --update rails <gems-with-in-flight-changes>
+```
+
+For each failure (`Because Gemfile depends on X ~> A and rails ~> B ...`): record X as a blocker, relax its constraint in the scratch Gemfile, re-run. Repeat until the bundle resolves. Nothing is installed or committed.
+
+### 2. Classify every gem that moved
+
+Diff the scratch lockfile against the base lockfile and bucket each moved gem:
+
+| Bucket | Test | Action |
+|---|---|---|
+| **Must move with the bump** | Required by the target Rails and doesn't resolve on the current one | Bump PR |
+| **Pre-loadable** | `bundle lock --update <gem> --conservative` on the base branch reaches the same version | Small PRs ahead of the hop |
+| **Incidental** | Nothing in the target's requirement chain needs the new version | Pin at its current major in the bump PR |
+
+Test pre-loadability one gem at a time from a fresh base lockfile.
+
+### 3. Check each chosen version
+
+- Latest release? If not, record what holds it back.
+- Passes the repo's release gates (minimum release age, license scan)?
+- Adds a runtime dependency or native extension? Name it in the PR.
+
+### 4. Default gems pinned below Ruby's version
+
+If the Gemfile pins a default/bundled gem below the version Ruby ships, and the target raises its floor:
+
+1. Compare the locked version to Ruby's (`Gem::Specification.find_all_by_name(<gem>).select(&:default_gem?)`).
+2. Probe each API the app calls against the old version, Ruby's and the latest.
+3. Search every call form across app code, `lib/`, engines, views and specs.
+4. Boot and run CI on the moved pin; gems that call removed APIs at load time only show up there.
+
+---
+
 ## Caveats
 
 - **Both checks need network.** Railsbump is a hosted service; `bundle_report` fetches gem metadata via Bundler. Tell the user when either was skipped due to network failure — do not silently degrade.

@@ -1,0 +1,19 @@
+# Fixture expectations for rails-80-patterns.yml.
+#
+# Keyed by variable_name. `match` lines the pattern MUST flag; `no_match` lines
+# it MUST NOT flag. See rails-40-patterns.expectations.yml for the format.
+#
+# Run with:
+#   bin/test-patterns rails-upgrade/detection-scripts/patterns/rails-80-patterns.yml
+
+ENUM_KWARGS:
+  match:
+    - "  enum status: { active: 0, archived: 1 }, _prefix: true"
+  no_match:
+    - "  enum :status, { active: 0, archived: 1 }, prefix: true"
+
+URI_DEFAULT_PARSER_REGEXP:
+  match:
+    - "    url.match?(URI::DEFAULT_PARSER.regexp[:ABS_URI])"
+  no_match:
+    - "    url.match?(URI::RFC2396_PARSER.regexp[:ABS_URI])"

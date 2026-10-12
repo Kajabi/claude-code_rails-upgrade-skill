@@ -43,3 +43,26 @@ A common false-blocker pattern: gems that became unnecessary in a specific Rails
 - **Extracted as a back-compat shim**: `protected_attributes` is the *opposite* shape — it was extracted from Rails 4.0 specifically as a transitional shim for the old mass-assignment API and was never re-merged. It still exists as a separate gem, but if your code is moving to `strong_parameters` you can remove it once the controllers are converted.
 
 If `bundle_report` flags one of these, check the target version guide before assuming you need a fork.
+
+---
+
+## Gems your organization owns
+
+Widening a private gem's Rails ceiling unblocks the resolver; it doesn't prove the gem works. Before relying on the widened release:
+
+1. Check which Rails the gem's CI runs (often only its own lockfile's, behind every consumer).
+2. Add a matrix of consumer versions: one `gemfiles/rails_X_Y.gemfile` per version that sets the Rails requirement and `eval_gemfile`s the main Gemfile, selected with `BUNDLE_GEMFILE`. Seed each lockfile from the main one (`cp`, then `bundle lock --update rails <test gems>`).
+3. Read what the re-resolve moved. Fix transitive major jumps (e.g. a pool or HTTP gem going keyword-only) in the gem before consumers lift their pin.
+
+---
+
+## Major bumps of a gem your code subclasses
+
+When the only compatible version is a new major and the app subclasses its classes:
+
+1. **Diff the API surface.** Install both versions to a temp dir; diff `public_instance_methods` and `private_instance_methods` (minus `Object`'s) on the base classes and value objects the app uses. Removed methods are call sites to fix. Added private methods can be silently overridden by a subclass method of the same name; grep the app for each.
+2. **Reproduce each break in a short script against both versions** to see which raise and which change behavior silently.
+3. **Resolve the enclosing class for every hit** (walk the AST); name-only scans over-count.
+4. **Check what the gem now does with caller values.** Grep the new version for `== nil`, `==`, `===`, `to_s`, `present?` on inputs. `value == nil` calls the value's `#==`: an `AssociationRelation` or `CollectionProxy` loads every row, and an app `#==` that assumes the same class can raise. Also check nil handling of required inputs and the shape of error output that reaches users or APIs.
+5. **Ship both-version changes as slices ahead of the bump**; keep one-version changes in the bump PR.
+6. **Add a spec for each silent failure mode.** A prepend patch for gem behavior needs a version check that warns on any gem version change and a spec that fails without it.
