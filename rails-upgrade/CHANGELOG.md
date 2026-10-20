@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Added "CRITICAL: Deployed environments and the DEPENDENCIES_NEXT gate". When deployed images dual-boot, each environment's `DEPENDENCIES_NEXT` value picks the Rails it runs. The skill now names the first change that makes the deployed sides differ (a lockfile divergence on a runtime gem, the first runtime `ENV["DEPENDENCIES_NEXT"]` branch, or a boot-script switch). At that change it stops for a per-environment table: value (expected unset, not `"0"`), the version actually running, who checked it, and when. The check repeats at each milestone, and cleanup removes the variable from every environment. Wired into Steps 2, 6 and 8, the pre-upgrade checklist, key principles and success criteria.
 - Gem compatibility workflow (Step 4.5): added a resolver dry-run and pre-load pass. Resolve the whole bundle against the target in a scratch worktree, classify each moved gem (must-move / pre-loadable / incidental), and check versions against latest and repo release gates. Catches path and private gems that railsbump skips.
 - `references/gem-compatibility.md`: added "Gems your organization owns" (CI matrix of consumer Rails versions) and "Major bumps of a gem your code subclasses" (method-set diff, two-version repro scripts, values the gem now compares or coerces).
 - Boot smoke test (Step 4.6): added "Large apps: find every failure in one pass" (bootboot `bundle lock` lockfile gotcha, next-side-only pins, Zeitwerk collect-don't-raise scan, app-level tripwires, all three environments, `DEPENDENCIES_NEXT=0` is truthy).

@@ -114,6 +114,40 @@ If the project wraps the check in a helper (e.g. `AppConfig.dependencies_next?`)
 - `bootboot` resolves and locks dependencies for both sets, but it does not switch your local Ruby. If the next set bumps Ruby, install the new Ruby separately (via `asdf` / `rbenv`) and switch before running `DEPENDENCIES_NEXT=1` commands.
 - `bootboot` does **not** ship a `bundle_report compatibility` equivalent. Step 4.5 (Gem Compatibility) uses railsbump.org as the primary check. `bundle_report compatibility` from `next_rails` is available as an offline alternative if the user already has it installed as a CLI; see `workflows/gem-compatibility-workflow.md`.
 
+### CRITICAL: Deployed environments and the DEPENDENCIES_NEXT gate
+
+Locally and in CI, `DEPENDENCIES_NEXT` is something you type. In a deployed environment it is configuration, and it can decide which Rails production runs.
+
+**When it applies.** It applies when the deployed image can dual-boot: it installs both gem sets, and the bootboot plugin loads there (`ENABLE_BOOTBOOT` is set, or the `RAILS_ENV` guard allows it). Then each environment's value picks the lockfile it boots. While both lockfiles resolve the same versions, a wrong value has no visible effect. The first change that makes them differ turns that value into a production version switch.
+
+To tell whether it applies, grep the image build and entry points (Dockerfile, buildpack or bin scripts, init scripts) for `DEPENDENCIES_NEXT=1 bundle install`, `ENABLE_BOOTBOOT`, or anything that reads `DEPENDENCIES_NEXT` at boot (a Ruby switch, for example). If deployed images install only `Gemfile.lock` and never load bootboot, say so in the report and skip the gate.
+
+**The gate fires on the first change that makes the deployed sides differ.** That's whichever comes first:
+- `Gemfile_next.lock` resolves a different version than `Gemfile.lock` for any gem a deployed process loads. This is usually Step 6 item 4, the next-side Rails pin.
+- The first `ENV["DEPENDENCIES_NEXT"]` branch in runtime code (`app/`, `lib/`, `config/`). Specs don't count.
+- The first boot script or Ruby-version switch keyed on the variable.
+
+Call it out by name in the report and in the PR that introduces it: "This is the first change that makes deployed environments differ by `DEPENDENCIES_NEXT`."
+
+**At the gate, stop and get this table.** The agent usually can't, and shouldn't, read deployed configuration. Hand the user the read-only command for each environment and fill the table from what they paste back.
+
+| Environment | Config source | `DEPENDENCIES_NEXT` | Rails actually running | Checked (when, by whom) |
+|---|---|---|---|---|
+
+- **Rows:** every deployed environment. That includes production, staging, every QA or review environment, preview apps, and workers, cron and one-off job runners. Check whether previews share one config. Include sibling services that boot the same image.
+- **Expected value:** unset. Not `"0"`, which bootboot treats as truthy.
+- **Who and how:** record who can change the value and how. A change usually applies only after a restart or redeploy.
+- **Running version:** verify the version actually running, not just the config. Use a health endpoint, a boot log line, or a boot-time metric tagged with environment and Rails version. If the app has none, recommend adding one before going further. It's the only way to see a flip land, or to catch an environment that is already flipped.
+- **Before proceeding:** every row must be expected, or its owner must explain it.
+
+**Re-check at every milestone,** and keep the table in the upgrade ticket:
+- each new divergence;
+- before and after flipping each environment to `1`;
+- full rollout: every environment on `1`, then the Gemfile default swapped;
+- cleanup: remove the variable from every environment *after* the default swap ships, then delete the code branches.
+
+**Flipping an environment is a deploy, not a config tweak.** Sequence it from least to most critical. The rollback is to unset the variable and restart. Watch errors by version during the flip, and never change the value as a side effect of other work.
+
 ---
 
 ## Trigger Patterns
@@ -343,6 +377,10 @@ Then:
 - Confirm both Gemfile.lock and Gemfile_next.lock now exist and pin the
   expected Rails versions.
 - Smoke-check the next side with `DEPENDENCIES_NEXT=1 bin/rails runner "puts Rails.version"`.
+- Check whether deployed images can dual-boot (see "CRITICAL: Deployed
+  environments and the DEPENDENCIES_NEXT gate"). If they can, record
+  that the gate applies, and take the first per-environment reading now,
+  while both lockfiles still match and a wrong value is harmless.
 ```
 
 ### Step 3: Validate Upgrade Path
@@ -441,7 +479,7 @@ instead of mid-implementation.
 1. Present Comprehensive Upgrade Report first
 2. Present app:update Preview Report second
 3. Apply fix-before-bump changes (`kind: breaking` and `kind: deprecation`). Most fixes are direct rewrites — the new API typically works on both sides of the dual-boot pair (e.g., `update_attributes` → `update`). Use an `if ENV["DEPENDENCIES_NEXT"]` guard only when the fix requires target-version-only APIs that don't exist in the current Rails
-4. Update the Gemfile's next-side conditional to the target Rails version (and any required gem bumps), then run `bundle install` so both Gemfile.lock and Gemfile_next.lock update
+4. Update the Gemfile's next-side conditional to the target Rails version (and any required gem bumps), then run `bundle install` so both Gemfile.lock and Gemfile_next.lock update. If deployed images dual-boot, this is usually the DEPENDENCIES_NEXT gate: STOP for the per-environment table before it ships (see "CRITICAL: Deployed environments and the DEPENDENCIES_NEXT gate"). The same applies to the first runtime `ENV["DEPENDENCIES_NEXT"]` branch from item 3
 5. Run test suite against both versions (`bundle exec rspec` and `DEPENDENCIES_NEXT=1 bundle exec rspec`)
 6. **Check CI config matches the upgraded Gemfile** — load `workflows/ci-sync-workflow.md`, fix any mismatches before proceeding
 7. Deploy and verify. Confirm each fix-before-bump release reaches 100% of production and compare errors before and after (use the repo's rollout-monitoring skill if it has one). Ship risky slices alone.
@@ -478,6 +516,10 @@ Triaging tomorrow's deprecation warnings now expands the scope of the current ho
    retires the bootboot scaffolding (plugin line, `enable_dual_booting`
    block, Gemfile_next.lock, conditional gem groups). Deprecation triage
    stays with this skill for the next hop, not with cleanup.
+4. If deployed images dual-boot, cleanup includes removing
+   DEPENDENCIES_NEXT from every environment, after the default swap has
+   shipped everywhere and before the variable can mean "the hop after
+   this one". Re-run the per-environment table to confirm.
 ```
 
 **Sample wording the agent can crib from when prompting the user:**
@@ -516,6 +558,12 @@ Before starting ANY upgrade:
 - [ ] Run app with Rails deprecations turned on (configured in config/environment files)
 - [ ] Address existing deprecation warnings
 - [ ] Enable verbose deprecations in test environment
+
+### 6. Deployed-Environment Audit (dual-booting images only)
+- [ ] Confirm whether deployed images install both gem sets and load bootboot
+- [ ] Per-environment table of `DEPENDENCIES_NEXT` (expected: unset) and the Rails version actually running
+- [ ] A way to see the running version per environment (health endpoint, boot log or metric)
+- [ ] Identify the change that will be the gate, and plan to stop there
 
 ---
 
@@ -670,6 +718,7 @@ Before delivering, verify:
 14. **Check CI Config Before Opening the PR** (run `workflows/ci-sync-workflow.md` to make sure every CI file matches the upgraded Gemfile — stale CI is the most common cause of red builds on upgrade PRs)
 15. **Align load_defaults After the Version Bump** (load_defaults update happens AFTER the Rails version upgrade is complete)
 16. **Mention, Don't Auto-Run, Cleanup** (after the upgrade ships, mention the `upgrade-cleanup` plugin. Delegate to it only when the user explicitly asks: "finish the upgrade", "clean up dual-boot", "drop the DEPENDENCIES_NEXT branches". Cleanup removes `if ENV["DEPENDENCIES_NEXT"]` branches and retires bootboot scaffolding. Deprecation triage stays with this skill for the next hop.)
+17. **Treat the Deployed Value of `DEPENDENCIES_NEXT` as a Production Version Switch** (when images dual-boot: audit every environment before the first change that makes the deployed sides differ, re-check at every milestone, and verify the version actually running. See "CRITICAL: Deployed environments and the DEPENDENCIES_NEXT gate".)
 
 ---
 
@@ -689,6 +738,7 @@ A successful upgrade assistance session:
 ✅ **Generated app:update Preview** using actual config files
 ✅ Used user's actual code from findings (not generic examples)
 ✅ Flagged all custom code with ⚠️ warnings based on detected issues
+✅ **Audited `DEPENDENCIES_NEXT` in every deployed environment before the first divergent change shipped** (dual-booting images only; table recorded and re-checked at each milestone)
 ✅ **Implemented changes and upgraded Rails version**
 ✅ **Verified CI config matches the upgraded Gemfile** (Ruby, Rails matrix, services — all mismatches fixed before opening the PR)
 ✅ **Aligned load_defaults** (after upgrade is complete)
