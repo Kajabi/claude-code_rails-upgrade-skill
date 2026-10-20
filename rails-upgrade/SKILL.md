@@ -134,7 +134,7 @@ Call it out by name in the report and in the PR that introduces it: "This is the
 | Environment | Config source | `DEPENDENCIES_NEXT` | Rails actually running | Checked (when, by whom) |
 |---|---|---|---|---|
 
-- **Rows:** every deployed environment. That includes production, staging, every QA or review environment, preview apps, and workers, cron and one-off job runners. Check whether previews share one config. Include sibling services that boot the same image.
+- **Rows:** every deployed environment. That includes production, staging, every QA or review environment, preview apps, and workers, cron and one-off job runners. Check whether previews share one config. Include sibling services that boot the same image. Add a row for every per-process override in the deployment manifests (see "Trial the next Rails on one process type at a time" below).
 - **Expected value:** unset. Not `"0"`, which bootboot treats as truthy.
 - **Who and how:** record who can change the value and how. A change usually applies only after a restart or redeploy.
 - **Running version:** verify the version actually running, not just the config. Use a health endpoint, a boot log line, or a boot-time metric tagged with environment and Rails version. If the app has none, recommend adding one before going further. It's the only way to see a flip land, or to catch an environment that is already flipped.
@@ -147,6 +147,18 @@ Call it out by name in the report and in the PR that introduces it: "This is the
 - cleanup: remove the variable from every environment *after* the default swap ships, then delete the code branches.
 
 **Flipping an environment is a deploy, not a config tweak.** Sequence it from least to most critical. The rollback is to unset the variable and restart. Watch errors by version during the flip, and never change the value as a side effect of other work.
+
+#### Trial the next Rails on one process type at a time
+
+Before you flip a whole environment, you can run the next Rails on a single process type, such as one background-job queue, then add more. This is usually done with a per-process override in the deployment manifests, often in a separate infrastructure repo (Kubernetes, Helm, Terraform), not in the environment-wide config store. Each override is a deploy in that repo, and the user merges it.
+
+1. **Put the override in the right scope.** Set `DEPENDENCIES_NEXT=1` on the target process's own container env, in the target environment's overlay. A patch in a component that several environments share flips that process in all of them at once. Read which environments include the file before editing it.
+2. **Check that the override actually wins.** Find the order in which config reaches the process. A common case is an entrypoint that sources the secret store's rendered file (for example a Vault agent template of `export KEY="value"` lines) *after* the container env is set. There, an environment-wide value, even `"0"`, silently replaces the per-process `1`, and the process boots the current Rails. Either make sure the environment-wide value is unset (that's the expected state anyway), or set the override in a file the entrypoint sources after the secret store. Confirm it from the running process's reported version, not from the manifest.
+3. **Carry the Ruby switch too,** if the next side also needs a different Ruby and the entrypoint keys the switch on its own variable.
+4. **Pick the first process type for low blast radius.** Prefer one whose jobs are idempotent and retryable, aren't on a money or auth path, and have enough volume to show errors within hours. Web or request-serving processes come last.
+5. **Clear mixed-fleet hazards first.** From the first override on, work written by one Rails is read by the other. That covers jobs enqueued by web and run by the trial worker, cache entries, Marshal dumps, message and cookie formats. Ship the fixes on the current side and let them reach 100% before the first override (see Step 6 item 7).
+6. **Track each override as an audit-table row**: environment × process type, its config source, the value, and the version actually running. Watch errors split by Rails version for that process type. To roll back, remove the override and redeploy (or revert that commit in the infrastructure repo).
+7. **Remove every per-process override in cleanup.** Do it when the environment flips as a whole, or at the latest with the default swap. A leftover `1` later means "the hop after this one".
 
 ---
 
@@ -517,7 +529,8 @@ Triaging tomorrow's deprecation warnings now expands the scope of the current ho
    block, Gemfile_next.lock, conditional gem groups). Deprecation triage
    stays with this skill for the next hop, not with cleanup.
 4. If deployed images dual-boot, cleanup includes removing
-   DEPENDENCIES_NEXT from every environment, after the default swap has
+   DEPENDENCIES_NEXT from every environment and every per-process
+   override in the deployment manifests, after the default swap has
    shipped everywhere and before the variable can mean "the hop after
    this one". Re-run the per-environment table to confirm.
 ```
@@ -564,6 +577,7 @@ Before starting ANY upgrade:
 - [ ] Per-environment table of `DEPENDENCIES_NEXT` (expected: unset) and the Rails version actually running
 - [ ] A way to see the running version per environment (health endpoint, boot log or metric)
 - [ ] Identify the change that will be the gate, and plan to stop there
+- [ ] Know where per-process overrides live (infrastructure repo, overlay scope) and which config source wins at boot
 
 ---
 
