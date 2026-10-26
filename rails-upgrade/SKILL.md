@@ -96,10 +96,10 @@ DEPENDENCIES_NEXT=1 bin/rails server
 
 ### Code-level dual-boot guard
 
-When a fix has to live on both sides, gate it on the same env var Bundler uses. **Do not** use `respond_to?` or other feature detection — `ENV["DEPENDENCIES_NEXT"]` matches what bootboot itself reads, so the boot-time gate and the code-time gate stay aligned.
+When a fix has to live on both sides, gate it on the same env var, compared the same way as the Gemfile: `== "1"`. **Do not** use `respond_to?` or other feature detection, and don't use a bare truthiness check. With every gate on `"1"`, the boot-time and code-time gates stay aligned.
 
 ```ruby
-if ENV["DEPENDENCIES_NEXT"]
+if ENV["DEPENDENCIES_NEXT"] == "1"
   # Code that requires the next Rails version
 else
   # Code that runs against the current Rails version
@@ -110,7 +110,7 @@ If the project wraps the check in a helper (e.g. `AppConfig.dependencies_next?`)
 
 ### Caveats
 
-- **Always set `DEPENDENCIES_NEXT=1` exactly.** Bootboot picks the lockfile on truthiness (`if ENV['DEPENDENCIES_NEXT']`), while the Gemfile block above compares to `"1"`. Any other value (`true`, `yes`) makes bootboot select `Gemfile_next.lock` while the Gemfile resolves the *current* pins into it. CI env blocks should use the string `"1"`; the code-level guard below stays a plain truthiness check because bootboot itself exports `1` while syncing.
+- **Gate every check on `== "1"`.** That covers the `enable_dual_booting` block, the Gemfile pins, and code-level guards. Bootboot only switches lockfiles once `enable_dual_booting` runs, so with that call inside `== "1"` (step 1), only `"1"` means next: unset, `"0"`, `true` or an empty string all boot the current side. To opt in, set exactly `"1"`. Don't let `bundle bootboot` add an unconditional `enable_dual_booting`; it would make any value select `Gemfile_next.lock`.
 - `bootboot` resolves and locks dependencies for both sets, but it does not switch your local Ruby. If the next set bumps Ruby, install the new Ruby separately (via `asdf` / `rbenv`) and switch before running `DEPENDENCIES_NEXT=1` commands.
 - `bootboot` does **not** ship a `bundle_report compatibility` equivalent. Step 4.5 (Gem Compatibility) uses railsbump.org as the primary check. `bundle_report compatibility` from `next_rails` is available as an offline alternative if the user already has it installed as a CLI; see `workflows/gem-compatibility-workflow.md`.
 
@@ -135,7 +135,7 @@ Call it out by name in the report and in the PR that introduces it: "This is the
 |---|---|---|---|---|
 
 - **Rows:** every deployed environment. That includes production, staging, every QA or review environment, preview apps, and workers, cron and one-off job runners. Check whether previews share one config. Include sibling services that boot the same image. Add a row for every per-process override in the deployment manifests (see "Trial the next Rails on one process type at a time" below).
-- **Expected value:** unset. Not `"0"`, which bootboot treats as truthy.
+- **Expected value:** anything but `"1"`, so unset or `"0"`. That holds because every gate compares to `"1"` (see Caveats under dual-boot setup); check that first.
 - **Who and how:** record who can change the value and how. A change usually applies only after a restart or redeploy.
 - **Running version:** verify the version actually running, not just the config. Use a health endpoint, a boot log line, or a boot-time metric tagged with environment and Rails version. If the app has none, recommend adding one before going further. It's the only way to see a flip land, or to catch an environment that is already flipped.
 - **Before proceeding:** every row must be expected, or its owner must explain it.
