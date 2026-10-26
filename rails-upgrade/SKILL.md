@@ -116,7 +116,7 @@ If the project wraps the check in a helper (e.g. `AppConfig.dependencies_next?`)
 
 ### CRITICAL: Deployed environments and the DEPENDENCIES_NEXT gate
 
-Locally and in CI, `DEPENDENCIES_NEXT` is something you type. In a deployed environment it is configuration, and it can decide which Rails production runs.
+Locally and in CI, you set `DEPENDENCIES_NEXT` per command or per job. In a deployed environment it's configuration that every process reads at boot, so its value decides which Rails that environment runs, production included.
 
 **When it applies.** It applies when the deployed image can dual-boot: it installs both gem sets, and the bootboot plugin loads there (`ENABLE_BOOTBOOT` is set, or the `RAILS_ENV` guard allows it). Then each environment's value picks the lockfile it boots. While both lockfiles resolve the same versions, a wrong value has no visible effect. The first change that makes them differ turns that value into a production version switch.
 
