@@ -1,9 +1,12 @@
 # Changelog
 
 ## Unreleased
+- Standardized on gating every `DEPENDENCIES_NEXT` check on `== "1"`: the `enable_dual_booting` block, Gemfile pins and the code-level guard (which previously used truthiness). Only `"1"` means next; unset and `"0"` both boot the current side.
+- Added "CRITICAL: DEPENDENCIES_NEXT in deployed environments". When deployed images dual-boot, each environment's value picks the Rails it runs. The flow: inventory every environment (value and the Rails actually running) before the upgrade starts; ship forward-compatible changes on the current version first; flip one environment at a time (development, QA, staging, production), monitoring each until confident; then remove the variable everywhere in cleanup. Wired into Steps 2, 6 and 8, the pre-upgrade checklist, key principles and success criteria.
+- Added "Rarely: trial the next Rails on one job type first": per-process `DEPENDENCIES_NEXT` overrides in the deployment manifests, covering overlay scope, config precedence against an entrypoint that sources the secret store, the Ruby switch, choosing a low-risk process type, and removing overrides.
 - Gem compatibility workflow (Step 4.5): added a resolver dry-run and pre-load pass. Resolve the whole bundle against the target in a scratch worktree, classify each moved gem (must-move / pre-loadable / incidental), and check versions against latest and repo release gates. Catches path and private gems that railsbump skips.
 - `references/gem-compatibility.md`: added "Gems your organization owns" (CI matrix of consumer Rails versions) and "Major bumps of a gem your code subclasses" (method-set diff, two-version repro scripts, values the gem now compares or coerces).
-- Boot smoke test (Step 4.6): added "Large apps: find every failure in one pass" (bootboot `bundle lock` lockfile gotcha, next-side-only pins, Zeitwerk collect-don't-raise scan, app-level tripwires, all three environments, `DEPENDENCIES_NEXT=0` is truthy).
+- Boot smoke test (Step 4.6): added "Large apps: find every failure in one pass" (bootboot `bundle lock` lockfile gotcha, next-side-only pins, Zeitwerk collect-don't-raise scan, app-level tripwires, all three environments, guards compare to `"1"`).
 - Detection workflow: added Step 3b (app-level Rails version gates; run removed-API cops repo-wide when CI lints only the diff) and a regex-dialect warning (use the Grep tool, `rg` or `git grep -P`).
 - Step 1: added a large-monolith path (`5b`) that uses the last green CI run on the base branch as the baseline.
 - Step 6: verify each fix-before-bump release at 100% of production; added `references/proving-mechanical-refactors.md`.

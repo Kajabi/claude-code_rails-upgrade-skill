@@ -103,7 +103,7 @@ Boot-fix-reboot finds one failure per boot. On a large app, collect them all:
    - Deprecation subscribers that raise in dev/test: allow-list the target's warnings about the version after it (they belong to the next hop).
    - Framework validations that name only the first offender (e.g. routes): temporarily patch the validating method to log and continue, so one boot lists them all.
 5. **Boot development, test and production on both sides.** Production eager-loads at boot. Only differences count.
-6. **Check how CI sets the variable.** `DEPENDENCIES_NEXT=0` is truthy to bootboot and to `if ENV["DEPENDENCIES_NEXT"]`. Make guards compare to `"1"`.
+6. **Check how CI sets the variable.** Every guard (Gemfile and code) must compare to `"1"`. Then unset and `"0"` both boot the current side. A bare `if ENV["DEPENDENCIES_NEXT"]` treats `"0"` as next.
 7. **Split the work.** Fixes that behave the same on both versions go in a pre-work PR; the `Gemfile_next` PR stays `Gemfile` + `Gemfile_next.lock`.
 
 ## Output

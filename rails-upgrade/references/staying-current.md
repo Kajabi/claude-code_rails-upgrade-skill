@@ -80,12 +80,11 @@ before_script:
 script:
   - bundle exec rspec
 
-# Use jobs.include so the "current" entry has NO env line — leaving
-# DEPENDENCIES_NEXT unset (nil/falsy) in Ruby. Do NOT use Travis's
-# list-form `env:` matrix here: `DEPENDENCIES_NEXT=` exports an empty
-# string, which Ruby treats as truthy, and the code-level dual-boot
-# guard `if ENV["DEPENDENCIES_NEXT"]` would take the next-version path
-# on the "current" lockfile.
+# Use jobs.include so the "current" entry has NO env line, leaving
+# DEPENDENCIES_NEXT unset. Every guard compares to "1", so an empty
+# string from Travis's list-form `env:` matrix would also boot the
+# current side; a bare `if ENV["DEPENDENCIES_NEXT"]` would not, because
+# Ruby treats "" as truthy.
 jobs:
   include:
     - rvm: 3.2.0
