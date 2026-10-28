@@ -611,7 +611,7 @@ Before starting ANY upgrade:
 
 **Action - Step 2 (Set Up Dual-Boot):**
 1. Follow the "CRITICAL: Dual-Boot Setup with bootboot" section above for inline setup
-2. Wire bootboot into the Gemfile, run `bundle install`, seed `Gemfile_next.lock` (`cp Gemfile.lock Gemfile_next.lock && DEPENDENCIES_NEXT=1 bundle install`), and extend CI to run the next-dependency-set side (`DEPENDENCIES_NEXT=1`)
+2. Wire bootboot into the Gemfile, run `bundle install`, seed `Gemfile_next.lock` (`cp Gemfile.lock Gemfile_next.lock && DEPENDENCIES_NEXT=1 bundle install`), and extend CI to run the next-dependency-set side (`DEPENDENCIES_NEXT=1`), either as a per-PR matrix entry or as a parameter switch with an on-demand trigger, flipped while production is being moved (see `workflows/ci-sync-workflow.md`)
 
 **Action - Step 3 (Validate Upgrade Path):**
 1. Validate upgrade path (single-hop vs multi-hop)
