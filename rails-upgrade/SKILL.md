@@ -106,7 +106,7 @@ else
 end
 ```
 
-If the project wraps the check in a helper (e.g. `AppConfig.dependencies_next?`), use that helper instead of inlining the env-var read. Step 8 collapses both shapes when the hop is finalized.
+If the project wraps the check in a helper (e.g. `AppConfig.dependencies_next?`), use that helper instead of inlining the env-var read. Step 8 collapses both shapes when the upgrade is finalized.
 
 ### Caveats
 
@@ -141,7 +141,7 @@ The value is normally set per environment: local, development, each QA environme
 - To roll back, unset the value (or set anything but `"1"`) and restart.
 - Update the inventory table after each flip.
 
-**4. Finalize.** After the finalize PR (Step 8) has shipped to an environment, remove the variable there and from every per-process override, then re-run the inventory. A leftover `"1"` would later mean "the hop after this one".
+**4. Finalize.** After the finalize PR (Step 8) has shipped to an environment, remove the variable there and from every per-process override, then re-run the inventory. A leftover `"1"` would later mean "the next Rails bump".
 
 #### Rarely: trial the next Rails on one job type first
 
@@ -277,7 +277,7 @@ If user requests a multi-hop upgrade (e.g., 5.2 → 8.1):
 - `workflows/boot-smoke-test-workflow.md` - **Load in Step 4.6** - Boot Rails under the next dependency set (`DEPENDENCIES_NEXT=1`) to catch gem-level runtime incompat that the resolver can't see (gems calling removed Rails internals or `require`-ing removed files).
 - `workflows/ci-sync-workflow.md` - **MANDATORY before opening the upgrade PR** - How to verify CI config matches the upgraded Gemfile
 - `workflows/app-update-preview-workflow.md` - How to generate app:update previews
-- **`upgrade-cleanup` companion plugin** - User-triggered, and only for removing the dual-boot setup entirely (bootboot, `Gemfile_next.lock`, the CI switch). Finishing a hop is Step 8 of this skill, which keeps the dual-boot setup for the next hop.
+- **`upgrade-cleanup` companion plugin** - User-triggered, and only for removing the dual-boot setup entirely (bootboot, `Gemfile_next.lock`, the CI switch). Finishing an upgrade is Step 8 of this skill, which keeps the dual-boot setup for the next upgrade.
 
 ### Examples (Load when user needs clarification)
 - `examples/simple-upgrade.md` - Single-hop upgrade example
@@ -512,11 +512,11 @@ Triaging tomorrow's deprecation warnings now expands the scope of the current ho
 
 **If `load_defaults` lags the installed Rails by more than one version** (several `new_framework_defaults_*.rb` files), load `references/load-defaults-debt.md`. Check this at Step 0: it changes how much pre-work the hop carries.
 
-### Step 8: Finalize the Hop (after production is stable on the new version)
+### Step 8: Finalize the Upgrade (after production is stable on the new version)
 ```
 The dual-boot setup STAYS: the bootboot plugin and enable_dual_booting
-block, Gemfile_next.lock, and the CI dependency-set switch are reused by
-the next hop. Finalizing makes the default side resolve the new version
+block, Gemfile_next.lock, and the CI dependency-set switch are reused for
+the next Rails bump. Finalizing makes the default side resolve the new version
 and removes the code that switches between the two.
 
 1. When the new version goes live in production, file a follow-up ticket
@@ -551,12 +551,12 @@ and removes the code that switches between the two.
 
 Delegate to the upgrade-cleanup plugin only when the user explicitly asks
 to remove the dual-boot setup entirely. Deprecation triage for the next
-hop stays with this skill.
+upgrade stays with this skill.
 ```
 
 **Sample wording the agent can crib from when prompting the user:**
 
-> Rails X.Y is live in production. I filed <ticket> to finalize it once production has been stable for a few days: collapse the `DEPENDENCIES_NEXT` switches and version branches, make `Gemfile.lock` match `Gemfile_next.lock`, then unset the flag in each environment after that PR is deployed there. The dual-boot setup stays for the next hop.
+> Rails X.Y is live in production. I filed <ticket> to finalize it once production has been stable for a few days: collapse the `DEPENDENCIES_NEXT` switches and version branches, make `Gemfile.lock` match `Gemfile_next.lock`, then unset the flag in each environment after that PR is deployed there. The dual-boot setup stays for the next upgrade.
 
 ---
 
@@ -750,7 +750,7 @@ Before delivering, verify:
 13. **Always Use `ENV["DEPENDENCIES_NEXT"]` for Dual-Boot Code** (NEVER use `respond_to?` for version branching. Bootboot reads the same env var to pick a lockfile, so the boot-time gate and the code-time gate stay aligned. See "CRITICAL: Dual-Boot Setup with bootboot" for patterns.)
 14. **Check CI Config Before Opening the PR** (run `workflows/ci-sync-workflow.md` to make sure every CI file matches the upgraded Gemfile — stale CI is the most common cause of red builds on upgrade PRs)
 15. **Align load_defaults After the Version Bump** (load_defaults update happens AFTER the Rails version upgrade is complete)
-16. **Finalize the Hop; Keep the Dual-Boot Setup** (once the new version is live in production, file the finalize ticket; after a few stable days, collapse the `DEPENDENCIES_NEXT` switches and version branches, make `Gemfile.lock` match `Gemfile_next.lock`, and unset the flag in every environment after the PR is deployed there. See Step 8. Use the `upgrade-cleanup` plugin only when the user explicitly asks to remove the dual-boot setup entirely.)
+16. **Finalize the Upgrade; Keep the Dual-Boot Setup** (once the new version is live in production, file the finalize ticket; after a few stable days, collapse the `DEPENDENCIES_NEXT` switches and version branches, make `Gemfile.lock` match `Gemfile_next.lock`, and unset the flag in every environment after the PR is deployed there. See Step 8. Use the `upgrade-cleanup` plugin only when the user explicitly asks to remove the dual-boot setup entirely.)
 17. **Treat the Deployed Value of `DEPENDENCIES_NEXT` as a Production Version Switch** (when images dual-boot: inventory every environment before the upgrade starts, ship forward-compatible changes on the current version first, then flip one environment at a time and verify the version actually running. See "CRITICAL: DEPENDENCIES_NEXT in deployed environments".)
 
 ---
@@ -775,7 +775,7 @@ A successful upgrade assistance session:
 ✅ **Implemented changes and upgraded Rails version**
 ✅ **Verified CI config matches the upgraded Gemfile** (Ruby, Rails matrix, services — all mismatches fixed before opening the PR)
 ✅ **Aligned load_defaults** (after upgrade is complete)
-✅ **Filed the finalize ticket when the upgrade went live** (switches and version branches removed, lockfiles matched, DEPENDENCIES_NEXT unset in every environment after the deploy; dual-boot setup kept for the next hop)
+✅ **Filed the finalize ticket when the upgrade went live** (switches and version branches removed, lockfiles matched, DEPENDENCIES_NEXT unset in every environment after the deploy; dual-boot setup kept for the next upgrade)
 ✅ Provided clear next steps
 ✅ Offered to help implement changes
 
