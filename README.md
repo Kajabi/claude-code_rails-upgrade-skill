@@ -118,7 +118,8 @@ In Claude Code, navigate to your Rails application directory and use natural lan
 | Command | Description |
 |---------|-------------|
 | `/rails-upgrade` | Start the upgrade assistant |
-| "Finish the upgrade" / "Clean up dual-boot" / "Abandon this upgrade" | Trigger the `upgrade-cleanup` plugin. Asks whether to keep the next or current version, then drops `if ENV["DEPENDENCIES_NEXT"]` branches and retires bootboot scaffolding. |
+| "Finish the upgrade" / "Make Rails X.Y the default" | Step 8 of `rails-upgrade`: collapse the `DEPENDENCIES_NEXT` switches and version branches, make `Gemfile.lock` match `Gemfile_next.lock`, then unset the flag in each environment after the deploy. The dual-boot setup stays for the next hop. |
+| "Remove the dual-boot setup entirely" / "Abandon this upgrade" | Trigger the `upgrade-cleanup` plugin. Asks whether to keep the next or current version, then drops `if ENV["DEPENDENCIES_NEXT"]` branches and retires bootboot scaffolding. |
 | "Upgrade to Rails X.Y" | Generate reports from detection results |
 | "Show app:update changes" | Preview configuration file changes |
 | "Plan upgrade from X to Y" | Get multi-hop upgrade strategy |
@@ -133,11 +134,13 @@ Run your application with two versions of Rails simultaneously using the [`bootb
 
 Step 2 of the upgrade workflow wires bootboot into the Gemfile inline (see `rails-upgrade/SKILL.md` → "CRITICAL: Dual-Boot Setup with bootboot" for the snippet). Application code that has to branch on the active dependency set uses `if ENV["DEPENDENCIES_NEXT"]` — the same env var bootboot reads, so the boot-time gate and the code-time gate stay aligned.
 
-### Post-Upgrade Cleanup
+### Finishing a Hop
 
-Once a hop is finished (or abandoned), the `upgrade-cleanup` sibling plugin tears down the dual-boot scaffolding so the tree stops carrying two Rails versions in parallel. It is scoped tightly to scaffolding removal, not a kitchen-sink "finish the upgrade" pass.
+Finishing a hop keeps the dual-boot setup: the bootboot plugin, `Gemfile_next.lock` and any CI dependency-set switch are reused by the next hop. Step 8 of `rails-upgrade` collapses the `DEPENDENCIES_NEXT` switches and version branches, makes `Gemfile.lock` match `Gemfile_next.lock`, and unsets the flag in every environment once that PR is deployed there.
 
-Activate it with phrases like "finish the upgrade", "clean up dual-boot", or "abandon this upgrade". The workflow:
+### Removing Dual-Boot Entirely
+
+The `upgrade-cleanup` sibling plugin tears down the dual-boot scaffolding, for a project that is abandoning an upgrade or no longer wants dual-boot at all. Activate it with phrases like "remove the dual-boot setup entirely" or "abandon this upgrade". The workflow:
 
 1. **Phase 0 - Pre-flight.** Detects Docker vs local, smoke-checks `bundle` / `bin/rails runner` on both sides, and asks whether to keep the **next** version (finishing) or the **current** version (abandoning / pausing the hop).
 2. **Phase 1 - Dual-boot removal.** Drops `if ENV["DEPENDENCIES_NEXT"]` branches (and any project-specific wrapper helpers), removes the bootboot plugin loader and `enable_dual_booting` activation from the `Gemfile`, swaps lockfiles, and updates CI to drop the dual-boot job. If the project previously ran on `next_rails`, the workflow notes how to sweep its residue (`Gemfile.next*`, `NextRails.next?`, `deprecation_tracker`) in the same pass.

@@ -123,13 +123,12 @@ Each step indicates the action for **keep next** vs **keep current**, per Phase 
 6. Reconcile lockfiles based on direction. Either path leaves `Gemfile_next.lock` gone from the tree:
    - **Keep next:** replace `Gemfile.lock` with `Gemfile_next.lock` (`mv Gemfile_next.lock Gemfile.lock`, which also removes `Gemfile_next.lock` from its old path). This preserves the exact gem versions tested during the upgrade. Do not run `bundle update` or delete the lockfile to re-resolve from scratch, that risks drift on versions you already validated.
    - **Keep current:** delete `Gemfile_next.lock`. Leave `Gemfile.lock` alone, it already pins the current version.
-   - **Exception, bootboot kept for the next hop:** if the build or CI still references `Gemfile_next.lock` (grep the Dockerfiles, e.g. `COPY Gemfile Gemfile.lock Gemfile_next.lock`, and CI cache keys), keep it as a copy instead of deleting it. For keep next: `mv Gemfile_next.lock Gemfile.lock && cp Gemfile.lock Gemfile_next.lock`. Deleting it breaks the image build.
 7. Run `bundle install` (NOT `bundle update`). `bundle install` is incremental: it removes references to gems no longer in the `Gemfile` (such as any dual-boot-only gems) without re-resolving the rest. Rails and friends stay pinned. If you removed the bootboot plugin line, also clear the cached plugin so subsequent bundles don't try to load it:
    ```sh
    bundle plugin uninstall bootboot 2>/dev/null || true
    ```
 8. Run the project's test suite (detect the runner from the `Gemfile`: `rspec-rails` means `bundle exec rspec`, otherwise `bundle exec rake test` or `bin/rails test`).
-9. Update CI to drop the dual-boot job/matrix entry (the one that ran `DEPENDENCIES_NEXT=1`). If CI selects the set with a parameter switch instead, set its default back to the current set (after the swap, current = the new version), re-generate any packed CI config, and delete the scheduled old-set run.
+9. Update CI to drop the dual-boot job/matrix entry (the one that ran `DEPENDENCIES_NEXT=1`).
 
 **Sanity check (keep next only):** after the lockfile swap, run `git diff Gemfile.lock` to confirm the new Rails version is actually pinned. If `Gemfile_next.lock` was never regenerated during the upgrade, it can be byte-identical to the old `Gemfile.lock`. In that case the lock is stale. Flag it to the user and run `bundle install` to resolve.
 
@@ -176,7 +175,7 @@ Before declaring cleanup done:
 - [ ] Test suite passes on the kept version (no dual-boot, single lockfile)
 - [ ] CI is green on the cleanup branch
 - [ ] `grep -rnE 'ENV\["DEPENDENCIES_NEXT"\]|dependencies_next\?' . --include="*.rb" --include="Gemfile"` returns nothing (apart from the bootboot plugin definition if you intentionally kept it for the next hop)
-- [ ] `Gemfile_next.lock` is gone (or, when bootboot stays for the next hop and the build references it, an exact copy of `Gemfile.lock`)
+- [ ] `Gemfile_next.lock` is gone
 - [ ] No leftover `plugin "bootboot"` / `enable_dual_booting` in `Gemfile` (unless explicitly kept for the next hop)
 - [ ] Documentation reflects the kept Ruby/Rails versions (keep next → new baseline; keep current → unchanged from before the upgrade attempt)
 
@@ -216,5 +215,5 @@ Keep them as separate commits so reviewers can see each cleanup pass in isolatio
 - If `Gemfile_next.lock` does not exist, dual-boot was never set up or is already cleaned. Skip Phase 1 and tell the user.
 - If `ENV["DEPENDENCIES_NEXT"]` references appear inside vendored gems or `vendor/bundle/`, ignore them. Only application code matters.
 - When keeping next, detect the target version from the `Gemfile`'s `if ENV["DEPENDENCIES_NEXT"]` block or `Gemfile_next.lock`, not `Gemfile.lock`, which still holds the current version during dual-boot.
-- If the user wants to keep bootboot installed for the next hop, skip the plugin-line removal in Phase 1 Step 5 but still collapse the `if ENV["DEPENDENCIES_NEXT"]` conditionals. Delete `Gemfile_next.lock` unless the build or CI references it; then keep it as a copy of `Gemfile.lock` (Phase 1 Step 6 exception).
+- If the user wants to keep bootboot installed for the next hop, skip the plugin-line removal in Phase 1 Step 5 but still delete `Gemfile_next.lock` and collapse the `if ENV["DEPENDENCIES_NEXT"]` conditionals.
 - **If the repo was previously on next_rails and migrated to bootboot mid-upgrade**, residue may include `Gemfile.next`, `Gemfile.next.lock`, a Gemfile-local `next?` method, and stray `NextRails.next?` / `NextRails.current?` references. Run the same grep with the older patterns once (`grep -rE "NextRails\.(next|current)\?" . --include="*.rb" -l`) and sweep them as part of the same cleanup pass. The next_rails gem also shipped a `DeprecationTracker` library; if `grep -rnE "deprecation_tracker|DeprecationTracker|DEPRECATION_TRACKER" spec/ test/` returns hits, tear those down too (drop the `require`s, the `DeprecationTracker.track_rspec(...)` call, and any `spec/support/deprecation_warning.shitlist.json`). Removing the next_rails gem without sweeping the tracker first breaks test boot with `LoadError: cannot load such file -- deprecation_tracker`.
